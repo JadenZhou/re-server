@@ -1,0 +1,32 @@
+services:
+  # Optional local MongoDB. Skipped by default — Atlas is the team's source of truth.
+  # Run `docker compose --profile local up` to include it; point MONGO_URI at it
+  # for fast local dev without Atlas throttling.
+  mongo:
+    image: mongo:7
+    profiles: ["local"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  server:
+    build: ./REServer
+    ports:
+      - "7070:7070"
+    environment:
+      MONGO_URI: ${MONGO_URI:?MONGO_URI must be set in .env}
+
+  # Runs once and exits. Start it with `docker compose run --rm loader`.
+  # Not part of `docker compose up` so the server isn't blocked on a multi-minute load.
+  loader:
+    build: ./REDataLoader
+    profiles: ["load"]
+    environment:
+      MONGO_URI: ${MONGO_URI:?MONGO_URI must be set in .env}
+      RE_CSV_PATH: /data/nsw_property_data.csv
+    volumes:
+      - ./data:/data:ro
+
+volumes:
+  mongo_data:

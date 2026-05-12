@@ -45,7 +45,7 @@
                         <configuration>
                             <archive>
                                 <manifest>
-                                    <mainClass>neu.cs.doc.Main</mainClass>
+                                    <mainClass>app.REServer</mainClass>
                                 </manifest>
                             </archive>
                             <descriptorRefs>
