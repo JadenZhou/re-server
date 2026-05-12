@@ -2,6 +2,10 @@
 target/
 *.class
 *.jar
+*.exe
+
+# Assignment briefs / instructor materials (not source)
+*.pdf
 
 # Local data (CSV is 611MB — never commit)
 data/
