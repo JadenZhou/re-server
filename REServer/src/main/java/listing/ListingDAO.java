@@ -38,6 +38,28 @@ public class ListingDAO {
         this.propertiesColl = db.getCollection("properties");
     }
 
+    /** Creates a listing for the given property ObjectId at the specified price. */
+    public Optional<String> createListing(String propertyObjId, double price) {
+        if (!ObjectId.isValid(propertyObjId)) return Optional.empty();
+        ObjectId pid = new ObjectId(propertyObjId);
+
+        if (propertiesColl.find(Filters.eq("_id", pid)).first() == null) return Optional.empty();
+
+        Date now = new Date();
+        Document listing = new Document()
+                .append("pid", pid)
+                .append("is_discounted", false)
+                .append("date_added", now);
+        listingsColl.insertOne(listing);
+
+        pricingColl.insertOne(new Document()
+                .append("pid", pid)
+                .append("updated_price", price)
+                .append("date", now));
+
+        return Optional.of(listing.getObjectId("_id").toHexString());
+    }
+
     /** Randomly samples 1000 properties and creates a listing + initial price at +20% for each. */
     public int seedListings() {
         AggregateIterable<Document> sample = propertiesColl.aggregate(

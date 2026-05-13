@@ -13,6 +13,18 @@ public class ListingController {
         this.dao = dao;
     }
 
+    public void createListing(Context ctx) {
+        CreateListingRequest req = ctx.bodyValidator(CreateListingRequest.class)
+                .check(r -> r.propertyObjId != null && !r.propertyObjId.isEmpty(), "propertyObjId is required")
+                .check(r -> r.price > 0, "price must be positive")
+                .get();
+
+        dao.createListing(req.propertyObjId, req.price)
+                .ifPresentOrElse(
+                        id -> { ctx.result("Listing created: " + id); ctx.status(201); },
+                        () -> { ctx.result("Property not found"); ctx.status(404); });
+    }
+
     public void seedListings(Context ctx) {
         int count = dao.seedListings();
         ctx.result("Seeded " + count + " listings");
@@ -103,6 +115,11 @@ public class ListingController {
     }
 
     public static class PriceUpdateRequest {
+        public double price;
+    }
+
+    public static class CreateListingRequest {
+        public String propertyObjId;
         public double price;
     }
 }

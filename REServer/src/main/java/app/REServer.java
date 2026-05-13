@@ -51,6 +51,7 @@ public class REServer {
                 });
 
                 // Listing endpoints
+                app.post("/listing", ctx -> listingHandler.createListing(ctx));
                 app.post("/listing/seed", ctx -> listingHandler.seedListings(ctx));
                 app.get("/listing", ctx -> listingHandler.getAllListings(ctx));
                 app.get("/listing/{listingID}", ctx -> listingHandler.getListingById(ctx, ctx.pathParam("listingID")));
