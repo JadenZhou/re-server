@@ -38,13 +38,20 @@ public class PropertyDAO {
         Document d = new Document()
                 .append("property_id", parseLongOrNull(property.propertyID))
                 .append("post_code", property.postcode)
-                .append("purchase_price", parseLongOrNull(property.propertyPrice));
+                .append("purchase_price", parseLongOrNull(property.propertyPrice))
+                .append("address", property.address)
+                .append("council_name", property.councilName)
+                .append("property_type", property.propertyType)
+                .append("contract_date", property.contractDate)
+                .append("for_sale", property.forSale);
         coll.insertOne(d);
         return true;
     }
 
-    // Task 4.5 "hack": property_id is NOT unique in the source data — each row is a sale.
-    // The API expects a single Property; we return the most recent sale by contract_date.
+    // property_id is NOT unique in the source data — each row is a sale. The
+    // API returns the most recent sale by contract_date. contract_date is
+    // stored as an ISO-8601 String (YYYY-MM-DD), which sorts correctly under
+    // lexicographic ordering — equivalent to chronological order for that format.
     public Optional<Property> getPropertyById(String propertyID) {
         Long id = parseLongOrNull(propertyID);
         if (id == null) return Optional.empty();
@@ -87,10 +94,17 @@ public class PropertyDAO {
     private static Property toProperty(Document d) {
         Long pid = d.getLong("property_id");
         Long price = d.getLong("purchase_price");
-        return new Property(
+        Property p = new Property(
                 pid == null ? null : pid.toString(),
                 d.getString("post_code"),
                 price == null ? null : price.toString());
+        p.address = d.getString("address");
+        p.councilName = d.getString("council_name");
+        p.propertyType = d.getString("property_type");
+        p.contractDate = d.getString("contract_date");
+        Boolean forSale = d.getBoolean("for_sale");
+        p.forSale = forSale != null && forSale;
+        return p;
     }
 
     private static Long parseLongOrNull(String s) {
