@@ -27,7 +27,7 @@ public class Main {
             .build();
 
     private static final int BATCH_SIZE = 1000;
-    private static final String DB_NAME = "realestate";
+    private static final String DB_NAME = "nsw_property_data";
     private static final String COLLECTION_NAME = "properties";
 
     static final private String PATH_TO_FILE = System.getenv().getOrDefault("RE_CSV_PATH",
