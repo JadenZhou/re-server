@@ -5,6 +5,8 @@ import listing.ListingController;
 import listing.ListingDAO;
 import property.PropertyController;
 import property.PropertyDAO;
+import purchaser.PurchaserController;
+import purchaser.PurchaserDAO;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +23,9 @@ public class REServer {
 
             var listings = new ListingDAO();
             ListingController listingHandler = new ListingController(listings);
+
+            var purchasers = new PurchaserDAO();
+            PurchaserController purchaserHandler = new PurchaserController(purchasers);
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -50,6 +55,16 @@ public class REServer {
                 app.get("/listing", ctx -> listingHandler.getAllListings(ctx));
                 app.get("/listing/{listingID}", ctx -> listingHandler.getListingById(ctx, ctx.pathParam("listingID")));
                 app.post("/listing/{listingID}/price", ctx -> listingHandler.addPriceUpdate(ctx, ctx.pathParam("listingID")));
+
+                // Purchaser endpoints
+                app.post("/purchaser", ctx -> purchaserHandler.createPurchaser(ctx));
+                app.get("/purchaser", ctx -> purchaserHandler.getAllPurchasers(ctx));
+                app.get("/purchaser/{purchaserID}", ctx -> purchaserHandler.getPurchaserById(ctx, ctx.pathParam("purchaserID")));
+                app.get("/purchaser/postcode/{postcode}", ctx -> purchaserHandler.getPurchasersByPostcode(ctx, ctx.pathParam("postcode")));
+                app.post("/purchaser/{purchaserID}/interest", ctx -> purchaserHandler.addInterest(ctx, ctx.pathParam("purchaserID")));
+                app.delete("/purchaser/{purchaserID}/interest/{postcode}", ctx ->
+                        purchaserHandler.removeInterest(ctx, ctx.pathParam("purchaserID"), ctx.pathParam("postcode")));
+                app.post("/purchaser/seed", ctx -> purchaserHandler.seedPurchasers(ctx));
             });
 
 
