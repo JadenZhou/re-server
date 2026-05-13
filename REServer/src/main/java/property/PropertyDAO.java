@@ -16,7 +16,7 @@ import java.util.Optional;
 
 public class PropertyDAO {
 
-    private static final String DB_NAME = "realestate";
+    private static final String DB_NAME = "nsw_property_data";
     private static final String COLLECTION_NAME = "properties";
 
     // Cap unbounded queries so a single request can't try to ship millions of rows.

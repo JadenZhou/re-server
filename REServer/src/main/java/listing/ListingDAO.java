@@ -19,7 +19,7 @@ import java.util.Optional;
 
 public class ListingDAO {
 
-    private static final String DB_NAME = "realestate";
+    private static final String DB_NAME = "nsw_property_data";
     private static final int MAX_RESULTS = 1000;
 
     private final MongoCollection<Document> listingsColl;
