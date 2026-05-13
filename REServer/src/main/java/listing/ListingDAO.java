@@ -45,6 +45,7 @@ public class ListingDAO {
 
         List<Document> newListings = new ArrayList<>();
         List<Document> newPrices = new ArrayList<>();
+        List<ObjectId> listedPropIds = new ArrayList<>();
         Date now = new Date();
 
         for (Document prop : sample) {
@@ -63,11 +64,19 @@ public class ListingDAO {
                     .append("pid", propId)
                     .append("updated_price", listingPrice)
                     .append("date", now));
+
+            listedPropIds.add(propId);
         }
 
         if (newListings.isEmpty()) return 0;
         listingsColl.insertMany(newListings);
         pricingColl.insertMany(newPrices);
+
+        // Sync `for_sale = true` on the property docs that just got listed so
+        // PropertyDAO reads expose the listing state without a separate join.
+        propertiesColl.updateMany(
+                Filters.in("_id", listedPropIds),
+                new Document("$set", new Document("for_sale", true)));
         return newListings.size();
     }
 
