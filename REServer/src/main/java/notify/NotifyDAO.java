@@ -89,7 +89,7 @@ public class NotifyDAO {
         List<PurchaserSummary> out = new ArrayList<>();
         for (Document d : accounts.find(Filters.eq("account_type", "Buyer"))) {
             ObjectId id = d.getObjectId("_id");
-            List<String> postcodes = d.getList("postcodes", String.class, Collections.emptyList());
+            List<String> postcodes = d.getList("postcode_interest", String.class, Collections.emptyList());
             out.add(new PurchaserSummary(
                     id == null ? null : id.toHexString(),
                     d.getString("name"),
