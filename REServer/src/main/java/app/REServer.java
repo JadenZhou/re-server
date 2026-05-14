@@ -3,6 +3,9 @@ import io.javalin.Javalin;
 import io.javalin.config.JavalinConfig;
 import listing.ListingController;
 import listing.ListingDAO;
+import notify.NotifyController;
+import notify.NotifyDAO;
+import notify.NotifyService;
 import property.PropertyController;
 import property.PropertyDAO;
 import purchaser.PurchaserController;
@@ -26,6 +29,8 @@ public class REServer {
 
             var purchasers = new PurchaserDAO();
             PurchaserController purchaserHandler = new PurchaserController(purchasers);
+
+            NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -66,6 +71,10 @@ public class REServer {
                 app.delete("/purchaser/{purchaserID}/interest/{postcode}", ctx ->
                         purchaserHandler.removeInterest(ctx, ctx.pathParam("purchaserID"), ctx.pathParam("postcode")));
                 app.post("/purchaser/seed", ctx -> purchaserHandler.seedPurchasers(ctx));
+
+                // Notification report — for each Buyer with watched postcodes,
+                // list the for-sale properties in those postcodes (ID + price).
+                app.get("/notify", ctx -> notifyHandler.notify(ctx));
             });
 
 
