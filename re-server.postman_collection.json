@@ -1,0 +1,259 @@
+{
+  "info": {
+    "name": "RE Server Demo",
+    "description": "Pre-built request flow for demoing the Real Estate Server. Set the `baseUrl` collection variable if not running on localhost:7070.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:7070",
+      "type": "string"
+    },
+    {
+      "key": "listingID",
+      "value": "REPLACE_AFTER_FIRST_GET",
+      "type": "string",
+      "description": "Paste a real listing _id here after running `GET /listing`."
+    },
+    {
+      "key": "purchaserID",
+      "value": "REPLACE_AFTER_REGISTER",
+      "type": "string",
+      "description": "Paste the id returned by `POST /purchaser` here."
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health check",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": ["{{baseUrl}}"],
+          "path": [""]
+        },
+        "description": "Should return 'Real Estate server is running'."
+      }
+    },
+    {
+      "name": "1. Properties",
+      "item": [
+        {
+          "name": "GET /property/postcode/{postcode}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/property/postcode/2770",
+              "host": ["{{baseUrl}}"],
+              "path": ["property", "postcode", "2770"]
+            },
+            "description": "All historical sales in postcode 2770."
+          }
+        },
+        {
+          "name": "GET /property (price range)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/property?minPrice=1000000&maxPrice=2000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["property"],
+              "query": [
+                { "key": "minPrice", "value": "1000000" },
+                { "key": "maxPrice", "value": "2000000" }
+              ]
+            },
+            "description": "Filter by purchase price range."
+          }
+        },
+        {
+          "name": "POST /property (create)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"propertyID\": \"99999999\",\n  \"postcode\": \"2770\",\n  \"propertyPrice\": \"850000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/property",
+              "host": ["{{baseUrl}}"],
+              "path": ["property"]
+            },
+            "description": "Record a new property sale."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Listings",
+      "item": [
+        {
+          "name": "POST /listing/seed (bulk 1000)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/listing/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["listing", "seed"]
+            },
+            "description": "Picks 1000 random properties and creates active listings at +20% of last sale. Idempotent? No — re-running appends more listings. Skip if Atlas already has 1000."
+          }
+        },
+        {
+          "name": "GET /listing (all)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listing",
+              "host": ["{{baseUrl}}"],
+              "path": ["listing"]
+            },
+            "description": "All active listings. Grab a listing _id from the output and paste into the `listingID` collection variable."
+          }
+        },
+        {
+          "name": "GET /listing/{listingID}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/listing/{{listingID}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["listing", "{{listingID}}"]
+            },
+            "description": "Listing detail + full price history."
+          }
+        },
+        {
+          "name": "POST /listing/{listingID}/price (drop price)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 450000\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/listing/{{listingID}}/price",
+              "host": ["{{baseUrl}}"],
+              "path": ["listing", "{{listingID}}", "price"]
+            },
+            "description": "Append a price entry. If lower than the current latest, `is_discounted` flips to true on the listing."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Purchasers",
+      "item": [
+        {
+          "name": "POST /purchaser (register)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Demo Buyer\",\n  \"email\": \"demo@instructor.com\",\n  \"postcodes\": [\"2770\", \"2000\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchaser",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser"]
+            },
+            "description": "Register a new buyer with up to 5 NSW postcode interests. Copy the returned id into the `purchaserID` collection variable."
+          }
+        },
+        {
+          "name": "GET /purchaser (all)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/purchaser",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser"]
+            },
+            "description": "All buyer accounts."
+          }
+        },
+        {
+          "name": "GET /purchaser/postcode/{postcode}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/purchaser/postcode/2770",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser", "postcode", "2770"]
+            },
+            "description": "All buyers interested in postcode 2770 — primitive for listing-alert features."
+          }
+        },
+        {
+          "name": "GET /purchaser/{purchaserID}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/purchaser/{{purchaserID}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser", "{{purchaserID}}"]
+            },
+            "description": "Single buyer detail."
+          }
+        },
+        {
+          "name": "POST /purchaser/{purchaserID}/interest (add)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postcode\": \"2480\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/purchaser/{{purchaserID}}/interest",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser", "{{purchaserID}}", "interest"]
+            },
+            "description": "Add a postcode to this buyer's watch list. 5-max cap enforced by the server."
+          }
+        },
+        {
+          "name": "DELETE /purchaser/{purchaserID}/interest/{postcode}",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/purchaser/{{purchaserID}}/interest/2480",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser", "{{purchaserID}}", "interest", "2480"]
+            },
+            "description": "Remove a postcode from this buyer's watch list."
+          }
+        },
+        {
+          "name": "POST /purchaser/seed (bulk synthetic)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/purchaser/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["purchaser", "seed"]
+            },
+            "description": "Bulk-insert synthetic Buyer accounts with random 0-5 postcode interests."
+          }
+        }
+      ]
+    }
+  ]
+}
