@@ -31,7 +31,7 @@ import java.util.Set;
  *   email        String
  *   password     String     (legacy, optional)
  *   account_type String     ("Buyer" | "Seller" | ...)
- *   postcodes    [String]   (NEW — may be missing on legacy docs)
+ *   postcode_interest [String]   (may be missing on legacy docs)
  */
 public class PurchaserDAO {
 
@@ -85,7 +85,7 @@ public class PurchaserDAO {
                 .append("name", name.trim())
                 .append("email", email.trim().toLowerCase())
                 .append("account_type", BUYER_TYPE)
-                .append("postcodes", clean);
+                .append("postcode_interest", clean);
         coll.insertOne(d);
         return d.getObjectId("_id").toHexString();
     }
@@ -108,7 +108,7 @@ public class PurchaserDAO {
 
     public List<Purchaser> getPurchasersByPostcode(String postcode) {
         List<Purchaser> out = new ArrayList<>();
-        Bson filter = Filters.and(BUYER_FILTER, Filters.eq("postcodes", postcode));
+        Bson filter = Filters.and(BUYER_FILTER, Filters.eq("postcode_interest", postcode));
         for (Document d : coll.find(filter).limit(MAX_RESULTS)) {
             out.add(toPurchaser(d));
         }
@@ -125,13 +125,13 @@ public class PurchaserDAO {
                 BUYER_FILTER)).first();
         if (existing == null) return AddResult.NOT_FOUND;
 
-        List<String> current = existing.getList("postcodes", String.class, Collections.emptyList());
+        List<String> current = existing.getList("postcode_interest", String.class, Collections.emptyList());
         if (current.contains(postcode)) return AddResult.DUPLICATE;
         if (current.size() >= MAX_POSTCODES) return AddResult.LIMIT_REACHED;
 
         UpdateResult r = coll.updateOne(
                 Filters.eq("_id", new ObjectId(purchaserId)),
-                Updates.addToSet("postcodes", postcode));
+                Updates.addToSet("postcode_interest", postcode));
         return r.getModifiedCount() == 1 ? AddResult.OK : AddResult.NOT_FOUND;
     }
 
@@ -139,7 +139,7 @@ public class PurchaserDAO {
         if (!ObjectId.isValid(purchaserId)) return false;
         UpdateResult r = coll.updateOne(
                 Filters.and(Filters.eq("_id", new ObjectId(purchaserId)), BUYER_FILTER),
-                Updates.pull("postcodes", postcode));
+                Updates.pull("postcode_interest", postcode));
         return r.getModifiedCount() == 1;
     }
 
@@ -160,7 +160,7 @@ public class PurchaserDAO {
                     .append("name", "Synthetic Buyer " + i)
                     .append("email", "buyer" + i + "-" + suffix + "@example.com")
                     .append("account_type", BUYER_TYPE)
-                    .append("postcodes", new ArrayList<>(picks)));
+                    .append("postcode_interest", new ArrayList<>(picks)));
 
             if (batch.size() >= 1000) {
                 coll.insertMany(batch);
@@ -191,8 +191,7 @@ public class PurchaserDAO {
 
     private Purchaser toPurchaser(Document d) {
         String id = d.getObjectId("_id").toHexString();
-        // postcodes may be missing on legacy account docs
-        List<String> postcodes = d.getList("postcodes", String.class, Collections.emptyList());
+        List<String> postcodes = d.getList("postcode_interest", String.class, Collections.emptyList());
         return new Purchaser(id, d.getString("name"), d.getString("email"), new ArrayList<>(postcodes));
     }
 
