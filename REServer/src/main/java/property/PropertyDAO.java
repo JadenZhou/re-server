@@ -65,6 +65,13 @@ public class PropertyDAO {
         return collect(coll.find(Filters.eq("post_code", postCode)).limit(MAX_RESULTS));
     }
 
+    public List<Property> getForSalePropertiesByPostcode(String postCode) {
+        Bson filter = Filters.and(
+                Filters.eq("post_code", postCode),
+                Filters.eq("for_sale", true));
+        return collect(coll.find(filter).limit(MAX_RESULTS));
+    }
+
     public List<Property> getAllProperties() {
         return collect(coll.find().limit(MAX_RESULTS));
     }
@@ -104,6 +111,8 @@ public class PropertyDAO {
         p.contractDate = d.getString("contract_date");
         Boolean forSale = d.getBoolean("for_sale");
         p.forSale = forSale != null && forSale;
+        org.bson.types.ObjectId oid = d.getObjectId("_id");
+        p.mongoObjId = oid != null ? oid.toHexString() : null;
         return p;
     }
 

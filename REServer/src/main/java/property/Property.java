@@ -16,6 +16,8 @@ public class Property {
     public String councilName;
     public String propertyType;
     public String contractDate;
+    /** MongoDB _id as a hex string — populated by DAO, used by NotificationService to look up listing prices. */
+    public String mongoObjId;
 
     public Property() {}
 

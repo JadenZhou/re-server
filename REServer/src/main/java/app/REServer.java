@@ -6,6 +6,8 @@ import listing.ListingDAO;
 import notify.NotifyController;
 import notify.NotifyDAO;
 import notify.NotifyService;
+import notification.NotificationController;
+import notification.NotificationService;
 import property.PropertyController;
 import property.PropertyDAO;
 import purchaser.PurchaserController;
@@ -31,6 +33,8 @@ public class REServer {
             PurchaserController purchaserHandler = new PurchaserController(purchasers);
 
             NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
+            var notificationService = new NotificationService(purchasers, properties, listings);
+            NotificationController notificationHandler = new NotificationController(notificationService);
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -72,9 +76,10 @@ public class REServer {
                         purchaserHandler.removeInterest(ctx, ctx.pathParam("purchaserID"), ctx.pathParam("postcode")));
                 app.post("/purchaser/seed", ctx -> purchaserHandler.seedPurchasers(ctx));
 
-                // Notification report — for each Buyer with watched postcodes,
-                // list the for-sale properties in those postcodes (ID + price).
+                // Notification report (team implementation via NotifyDAO aggregation pipeline)
                 app.get("/notify", ctx -> notifyHandler.notify(ctx));
+                // Local alternative implementation using existing DAOs
+                app.get("/notify-local", ctx -> notificationHandler.notify(ctx));
             });
 
 

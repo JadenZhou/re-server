@@ -1,0 +1,119 @@
+@startuml Real Estate Server — Use Case Diagram
+left to right direction
+skinparam packageStyle rectangle
+skinparam usecase {
+    BackgroundColor LightSkyBlue
+    BorderColor DarkSlateBlue
+    FontColor Black
+    ArrowColor DimGrey
+}
+skinparam actor {
+    BackgroundColor LightYellow
+    BorderColor DarkGoldenrod
+}
+skinparam package {
+    BackgroundColor GhostWhite
+    BorderColor DimGrey
+}
+
+' ─── Actors ─────────────────────────────────────────────────────────────────
+actor "Buyer / Purchaser" as Buyer
+actor "Agent / Administrator" as Admin
+actor "Scheduled Job\n(System)" as Scheduler
+
+' ─── Real Estate Server ──────────────────────────────────────────────────────
+package "Real Estate Server" {
+
+    package "Property Catalogue" {
+        usecase "Browse all properties" as UC_PropAll
+        usecase "Search by postcode" as UC_PropPost
+        usecase "Search by price range" as UC_PropPrice
+        usecase "View property details" as UC_PropDetail
+        usecase "Add property record" as UC_PropCreate
+    }
+
+    package "Listings" {
+        usecase "Create listing for\na property" as UC_ListCreate
+        usecase "Seed demo listings" as UC_ListSeed
+        usecase "Browse all listings" as UC_ListAll
+        usecase "View listing &\nprice history" as UC_ListDetail
+        usecase "Update listing price" as UC_ListPrice
+    }
+
+    package "Purchaser Accounts" {
+        usecase "Register as a buyer" as UC_PurCreate
+        usecase "View buyer profile" as UC_PurView
+        usecase "Add postcode interest" as UC_PurAdd
+        usecase "Remove postcode interest" as UC_PurRemove
+        usecase "Search buyers by postcode" as UC_PurPost
+        usecase "Seed demo buyers" as UC_PurSeed
+    }
+}
+
+' ─── Notification System ────────────────────────────────────────────────────
+package "Notification System" {
+    usecase "Trigger notifications\n(GET /notify)" as UC_Notify
+    usecase "Match buyers to\nfor-sale properties" as UC_Match
+    usecase "View notification\nreport (HTML)" as UC_Report
+}
+
+' ─── Recommendation Engine (hypothetical) ───────────────────────────────────
+package "Recommendation Engine\n(Future / Hypothetical)" {
+    usecase "Get personalised\nrecommendations\n(GET /recommend/{buyerId})" as UC_Rec
+    usecase "Score & rank\nproperties for buyer" as UC_Score
+    usecase "Record buyer\nview / save" as UC_Track
+    usecase "Browse recommended\nlistings" as UC_RecView
+}
+
+' ─── Buyer relationships ─────────────────────────────────────────────────────
+Buyer --> UC_PropAll
+Buyer --> UC_PropPost
+Buyer --> UC_PropPrice
+Buyer --> UC_PropDetail
+Buyer --> UC_ListAll
+Buyer --> UC_ListDetail
+Buyer --> UC_PurCreate
+Buyer --> UC_PurView
+Buyer --> UC_PurAdd
+Buyer --> UC_PurRemove
+Buyer --> UC_Notify
+Buyer --> UC_Rec
+Buyer --> UC_Track
+Buyer --> UC_RecView
+
+' ─── Admin relationships ─────────────────────────────────────────────────────
+Admin --> UC_PropCreate
+Admin --> UC_ListCreate
+Admin --> UC_ListSeed
+Admin --> UC_ListPrice
+Admin --> UC_PurSeed
+Admin --> UC_PurPost
+Admin --> UC_Notify
+
+' ─── Scheduler relationships ─────────────────────────────────────────────────
+Scheduler --> UC_Notify
+
+' ─── Include / extend relationships ─────────────────────────────────────────
+UC_Notify ..> UC_Match   : <<include>>
+UC_Notify ..> UC_Report  : <<include>>
+
+UC_Rec    ..> UC_Score   : <<include>>
+UC_Rec    ..> UC_RecView : <<include>>
+UC_Track  ..> UC_Score   : <<extend>>
+
+note bottom of UC_Match
+  Queries all purchasers,
+  collects their postcodes,
+  then finds for-sale properties
+  in each postcode (cached per
+  postcode to minimise DB calls).
+end note
+
+note bottom of UC_Score
+  MVP score = postcode match +
+  discount flag + recency.
+  Future: collaborative filtering
+  from interaction history.
+end note
+
+@enduml

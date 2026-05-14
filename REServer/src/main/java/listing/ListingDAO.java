@@ -157,6 +157,12 @@ public class ListingDAO {
         return true;
     }
 
+    /** Returns the latest asking price for the property identified by its MongoDB hex ObjectId, or 0 if not found. */
+    public double getLatestPriceByPropertyObjId(String propertyObjId) {
+        if (propertyObjId == null || !ObjectId.isValid(propertyObjId)) return 0;
+        return getLatestPrice(new ObjectId(propertyObjId));
+    }
+
     private double getLatestPrice(ObjectId pid) {
         Document d = pricingColl.find(Filters.eq("pid", pid))
                 .sort(Sorts.descending("date"))
