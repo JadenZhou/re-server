@@ -1,8 +1,7 @@
 package listing;
 
+import app.Mongo;
 import com.mongodb.client.AggregateIterable;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Aggregates;
@@ -19,20 +18,22 @@ import java.util.Optional;
 
 public class ListingDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
     private static final int MAX_RESULTS = 1000;
+    private static final int SEED_SAMPLE = 1000;
+    private static final double LISTING_MARKUP = 1.2;
+    private static final String FIELD_PID = "pid";
+    private static final String FIELD_ID = "_id";
+    private static final String FIELD_UPDATED_PRICE = "updated_price";
+    private static final String FIELD_DATE = "date";
+    private static final String FIELD_IS_DISCOUNTED = "is_discounted";
+    private static final String FIELD_DATE_ADDED = "date_added";
 
     private final MongoCollection<Document> listingsColl;
     private final MongoCollection<Document> pricingColl;
     private final MongoCollection<Document> propertiesColl;
 
     public ListingDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
+        MongoDatabase db = Mongo.database();
         this.listingsColl = db.getCollection("listings");
         this.pricingColl = db.getCollection("property_pricing_updates");
         this.propertiesColl = db.getCollection("properties");
@@ -40,64 +41,61 @@ public class ListingDAO {
 
     /** Creates a listing for the given property ObjectId at the specified price. */
     public Optional<String> createListing(String propertyObjId, double price) {
-        if (!ObjectId.isValid(propertyObjId)) return Optional.empty();
+        if (!ObjectId.isValid(propertyObjId)) {
+            return Optional.empty();
+        }
         ObjectId pid = new ObjectId(propertyObjId);
 
-        if (propertiesColl.find(Filters.eq("_id", pid)).first() == null) return Optional.empty();
+        if (propertiesColl.find(Filters.eq(FIELD_ID, pid)).first() == null) {
+            return Optional.empty();
+        }
 
         Date now = new Date();
         Document listing = new Document()
-                .append("pid", pid)
-                .append("is_discounted", false)
-                .append("date_added", now);
+                .append(FIELD_PID, pid)
+                .append(FIELD_IS_DISCOUNTED, false)
+                .append(FIELD_DATE_ADDED, now);
         listingsColl.insertOne(listing);
+        pricingColl.insertOne(priceDoc(pid, price, now));
 
-        pricingColl.insertOne(new Document()
-                .append("pid", pid)
-                .append("updated_price", price)
-                .append("date", now));
-
-        return Optional.of(listing.getObjectId("_id").toHexString());
+        return Optional.of(listing.getObjectId(FIELD_ID).toHexString());
     }
 
     /** Randomly samples 1000 properties and creates a listing + initial price at +20% for each. */
     public int seedListings() {
         AggregateIterable<Document> sample = propertiesColl.aggregate(
-                Arrays.asList(Aggregates.sample(1000)));
+                Arrays.asList(Aggregates.sample(SEED_SAMPLE)));
 
-        List<Document> newListings = new ArrayList<>();
-        List<Document> newPrices = new ArrayList<>();
-        List<ObjectId> listedPropIds = new ArrayList<>();
+        List<Document> newListings = new ArrayList<>(SEED_SAMPLE);
+        List<Document> newPrices = new ArrayList<>(SEED_SAMPLE);
+        List<ObjectId> listedPropIds = new ArrayList<>(SEED_SAMPLE);
         Date now = new Date();
 
         for (Document prop : sample) {
-            ObjectId propId = prop.getObjectId("_id");
+            ObjectId propId = prop.getObjectId(FIELD_ID);
             Long purchasePrice = prop.getLong("purchase_price");
-            if (purchasePrice == null || purchasePrice <= 0) continue;
-
-            double listingPrice = purchasePrice * 1.2;
-
+            if (purchasePrice == null || purchasePrice <= 0) {
+                continue;
+            }
+            double listingPrice = purchasePrice * LISTING_MARKUP;
             newListings.add(new Document()
-                    .append("pid", propId)
-                    .append("is_discounted", false)
-                    .append("date_added", now));
-
-            newPrices.add(new Document()
-                    .append("pid", propId)
-                    .append("updated_price", listingPrice)
-                    .append("date", now));
-
+                    .append(FIELD_PID, propId)
+                    .append(FIELD_IS_DISCOUNTED, false)
+                    .append(FIELD_DATE_ADDED, now));
+            newPrices.add(priceDoc(propId, listingPrice, now));
             listedPropIds.add(propId);
         }
 
-        if (newListings.isEmpty()) return 0;
+        if (newListings.isEmpty()) {
+            return 0;
+        }
         listingsColl.insertMany(newListings);
         pricingColl.insertMany(newPrices);
 
         // Sync `for_sale = true` on the property docs that just got listed so
         // PropertyDAO reads expose the listing state without a separate join.
         propertiesColl.updateMany(
-                Filters.in("_id", listedPropIds),
+                Filters.in(FIELD_ID, listedPropIds),
                 new Document("$set", new Document("for_sale", true)));
         return newListings.size();
     }
@@ -111,22 +109,28 @@ public class ListingDAO {
     }
 
     public Optional<Listing> getListingById(String id) {
-        if (!ObjectId.isValid(id)) return Optional.empty();
-        Document d = listingsColl.find(Filters.eq("_id", new ObjectId(id))).first();
+        if (!ObjectId.isValid(id)) {
+            return Optional.empty();
+        }
+        Document d = listingsColl.find(Filters.eq(FIELD_ID, new ObjectId(id))).first();
         return Optional.ofNullable(d).map(this::toListing);
     }
 
     /** Returns all price entries for a listing, oldest first. */
     public List<PriceEntry> getPriceHistory(String listingId) {
-        if (!ObjectId.isValid(listingId)) return List.of();
-        Document listing = listingsColl.find(Filters.eq("_id", new ObjectId(listingId))).first();
-        if (listing == null) return List.of();
+        if (!ObjectId.isValid(listingId)) {
+            return List.of();
+        }
+        Document listing = listingsColl.find(Filters.eq(FIELD_ID, new ObjectId(listingId))).first();
+        if (listing == null) {
+            return List.of();
+        }
 
-        ObjectId pid = listing.getObjectId("pid");
+        ObjectId pid = listing.getObjectId(FIELD_PID);
         List<PriceEntry> out = new ArrayList<>();
-        for (Document d : pricingColl.find(Filters.eq("pid", pid)).sort(Sorts.ascending("date"))) {
-            Double price = d.getDouble("updated_price");
-            Date date = d.getDate("date");
+        for (Document d : pricingColl.find(Filters.eq(FIELD_PID, pid)).sort(Sorts.ascending(FIELD_DATE))) {
+            Double price = d.getDouble(FIELD_UPDATED_PRICE);
+            Date date = d.getDate(FIELD_DATE);
             if (price != null && date != null) {
                 out.add(new PriceEntry(price, date.toString()));
             }
@@ -136,41 +140,51 @@ public class ListingDAO {
 
     /** Adds a new price update for the property tied to this listing. */
     public boolean addPriceUpdate(String listingId, double newPrice) {
-        if (!ObjectId.isValid(listingId)) return false;
-        Document listing = listingsColl.find(Filters.eq("_id", new ObjectId(listingId))).first();
-        if (listing == null) return false;
+        if (!ObjectId.isValid(listingId)) {
+            return false;
+        }
+        Document listing = listingsColl.find(Filters.eq(FIELD_ID, new ObjectId(listingId))).first();
+        if (listing == null) {
+            return false;
+        }
 
-        ObjectId pid = listing.getObjectId("pid");
+        ObjectId pid = listing.getObjectId(FIELD_PID);
 
         // Mark discounted if the new price is lower than the current latest price
         double latest = getLatestPrice(pid);
         if (latest > 0 && newPrice < latest) {
             listingsColl.updateOne(
-                    Filters.eq("_id", new ObjectId(listingId)),
-                    new Document("$set", new Document("is_discounted", true)));
+                    Filters.eq(FIELD_ID, new ObjectId(listingId)),
+                    new Document("$set", new Document(FIELD_IS_DISCOUNTED, true)));
         }
 
-        pricingColl.insertOne(new Document()
-                .append("pid", pid)
-                .append("updated_price", newPrice)
-                .append("date", new Date()));
+        pricingColl.insertOne(priceDoc(pid, newPrice, new Date()));
         return true;
     }
 
+    private static Document priceDoc(ObjectId pid, double price, Date when) {
+        return new Document()
+                .append(FIELD_PID, pid)
+                .append(FIELD_UPDATED_PRICE, price)
+                .append(FIELD_DATE, when);
+    }
+
     private double getLatestPrice(ObjectId pid) {
-        Document d = pricingColl.find(Filters.eq("pid", pid))
-                .sort(Sorts.descending("date"))
+        Document d = pricingColl.find(Filters.eq(FIELD_PID, pid))
+                .sort(Sorts.descending(FIELD_DATE))
                 .first();
-        if (d == null) return 0;
-        Double p = d.getDouble("updated_price");
+        if (d == null) {
+            return 0;
+        }
+        Double p = d.getDouble(FIELD_UPDATED_PRICE);
         return p == null ? 0 : p;
     }
 
     private Listing toListing(Document d) {
-        String id = d.getObjectId("_id").toHexString();
-        ObjectId pid = d.getObjectId("pid");
-        boolean discounted = Boolean.TRUE.equals(d.getBoolean("is_discounted"));
-        Date dateAdded = d.getDate("date_added");
+        String id = d.getObjectId(FIELD_ID).toHexString();
+        ObjectId pid = d.getObjectId(FIELD_PID);
+        boolean discounted = Boolean.TRUE.equals(d.getBoolean(FIELD_IS_DISCOUNTED));
+        Date dateAdded = d.getDate(FIELD_DATE_ADDED);
         double latest = pid != null ? getLatestPrice(pid) : 0;
         return new Listing(
                 id,

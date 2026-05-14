@@ -1,9 +1,7 @@
 package purchaser;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
+import app.Mongo;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import com.mongodb.client.result.UpdateResult;
@@ -35,10 +33,14 @@ import java.util.Set;
  */
 public class PurchaserDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
     private static final String COLLECTION_NAME = "accounts";
     private static final String BUYER_TYPE = "Buyer";
+    private static final String FIELD_ID = "_id";
+    private static final String FIELD_POSTCODE_INTEREST = "postcode_interest";
+    private static final String FIELD_ACCOUNT_TYPE = "account_type";
     private static final int MAX_RESULTS = 1000;
+    private static final int BATCH_SIZE = 1000;
+    private static final int SEED_MAX_ATTEMPTS = 50;
     public static final int MAX_POSTCODES = 5;
 
     // NSW postcode ranges (rough): 1000-2599, 2619-2899, 2921-2999
@@ -46,26 +48,24 @@ public class PurchaserDAO {
             {1000, 2599}, {2619, 2899}, {2921, 2999}
     };
 
-    private static final Bson BUYER_FILTER = Filters.eq("account_type", BUYER_TYPE);
+    private static final Bson BUYER_FILTER = Filters.eq(FIELD_ACCOUNT_TYPE, BUYER_TYPE);
 
     private final MongoCollection<Document> coll;
 
     public PurchaserDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
-        this.coll = db.getCollection(COLLECTION_NAME);
+        this.coll = Mongo.database().getCollection(COLLECTION_NAME);
     }
 
     public static boolean isValidNswPostcode(String pc) {
-        if (pc == null) return false;
+        if (pc == null) {
+            return false;
+        }
         try {
             int n = Integer.parseInt(pc.trim());
             for (int[] r : NSW_RANGES) {
-                if (n >= r[0] && n <= r[1]) return true;
+                if (n >= r[0] && n <= r[1]) {
+                    return true;
+                }
             }
             return false;
         } catch (NumberFormatException e) {
@@ -75,19 +75,25 @@ public class PurchaserDAO {
 
     /** Returns new purchaser id, or null if invalid. */
     public String createPurchaser(String name, String email, List<String> postcodes) {
-        if (name == null || name.isBlank()) return null;
-        if (email == null || email.isBlank()) return null;
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        if (email == null || email.isBlank()) {
+            return null;
+        }
 
         List<String> clean = sanitizePostcodes(postcodes);
-        if (clean == null) return null;
+        if (clean == null) {
+            return null;
+        }
 
         Document d = new Document()
                 .append("name", name.trim())
                 .append("email", email.trim().toLowerCase())
-                .append("account_type", BUYER_TYPE)
-                .append("postcode_interest", clean);
+                .append(FIELD_ACCOUNT_TYPE, BUYER_TYPE)
+                .append(FIELD_POSTCODE_INTEREST, clean);
         coll.insertOne(d);
-        return d.getObjectId("_id").toHexString();
+        return d.getObjectId(FIELD_ID).toHexString();
     }
 
     public List<Purchaser> getAllPurchasers() {
@@ -99,16 +105,18 @@ public class PurchaserDAO {
     }
 
     public Optional<Purchaser> getPurchaserById(String id) {
-        if (!ObjectId.isValid(id)) return Optional.empty();
+        if (!ObjectId.isValid(id)) {
+            return Optional.empty();
+        }
         Document d = coll.find(Filters.and(
-                Filters.eq("_id", new ObjectId(id)),
+                Filters.eq(FIELD_ID, new ObjectId(id)),
                 BUYER_FILTER)).first();
         return Optional.ofNullable(d).map(this::toPurchaser);
     }
 
     public List<Purchaser> getPurchasersByPostcode(String postcode) {
         List<Purchaser> out = new ArrayList<>();
-        Bson filter = Filters.and(BUYER_FILTER, Filters.eq("postcode_interest", postcode));
+        Bson filter = Filters.and(BUYER_FILTER, Filters.eq(FIELD_POSTCODE_INTEREST, postcode));
         for (Document d : coll.find(filter).limit(MAX_RESULTS)) {
             out.add(toPurchaser(d));
         }
@@ -117,58 +125,75 @@ public class PurchaserDAO {
 
     /** Adds a postcode of interest. Returns OK / NOT_FOUND / INVALID_POSTCODE / DUPLICATE / LIMIT_REACHED. */
     public AddResult addInterest(String purchaserId, String postcode) {
-        if (!ObjectId.isValid(purchaserId)) return AddResult.NOT_FOUND;
-        if (!isValidNswPostcode(postcode)) return AddResult.INVALID_POSTCODE;
+        if (!ObjectId.isValid(purchaserId)) {
+            return AddResult.NOT_FOUND;
+        }
+        if (!isValidNswPostcode(postcode)) {
+            return AddResult.INVALID_POSTCODE;
+        }
 
         Document existing = coll.find(Filters.and(
-                Filters.eq("_id", new ObjectId(purchaserId)),
+                Filters.eq(FIELD_ID, new ObjectId(purchaserId)),
                 BUYER_FILTER)).first();
-        if (existing == null) return AddResult.NOT_FOUND;
+        if (existing == null) {
+            return AddResult.NOT_FOUND;
+        }
 
-        List<String> current = existing.getList("postcode_interest", String.class, Collections.emptyList());
-        if (current.contains(postcode)) return AddResult.DUPLICATE;
-        if (current.size() >= MAX_POSTCODES) return AddResult.LIMIT_REACHED;
+        List<String> current = existing.getList(FIELD_POSTCODE_INTEREST, String.class, Collections.emptyList());
+        if (current.contains(postcode)) {
+            return AddResult.DUPLICATE;
+        }
+        if (current.size() >= MAX_POSTCODES) {
+            return AddResult.LIMIT_REACHED;
+        }
 
         UpdateResult r = coll.updateOne(
-                Filters.eq("_id", new ObjectId(purchaserId)),
-                Updates.addToSet("postcode_interest", postcode));
+                Filters.eq(FIELD_ID, new ObjectId(purchaserId)),
+                Updates.addToSet(FIELD_POSTCODE_INTEREST, postcode));
         return r.getModifiedCount() == 1 ? AddResult.OK : AddResult.NOT_FOUND;
     }
 
     public boolean removeInterest(String purchaserId, String postcode) {
-        if (!ObjectId.isValid(purchaserId)) return false;
+        if (!ObjectId.isValid(purchaserId)) {
+            return false;
+        }
         UpdateResult r = coll.updateOne(
-                Filters.and(Filters.eq("_id", new ObjectId(purchaserId)), BUYER_FILTER),
-                Updates.pull("postcode_interest", postcode));
+                Filters.and(Filters.eq(FIELD_ID, new ObjectId(purchaserId)), BUYER_FILTER),
+                Updates.pull(FIELD_POSTCODE_INTEREST, postcode));
         return r.getModifiedCount() == 1;
     }
 
     /** Bulk-insert N synthetic Buyer accounts each with 0..5 random NSW postcodes. */
     public int seedPurchasers(int count) {
         Random rand = new Random();
-        List<Document> batch = new ArrayList<>();
+        List<Document> batch = new ArrayList<>(BATCH_SIZE);
         for (int i = 0; i < count; i++) {
-            int numPostcodes = rand.nextInt(MAX_POSTCODES + 1); // 0..5
-            Set<String> picks = new LinkedHashSet<>();
-            int attempts = 0;
-            while (picks.size() < numPostcodes && attempts < 50) {
-                picks.add(String.format("%04d", randomNswPostcode(rand)));
-                attempts++;
-            }
-            String suffix = Long.toHexString(System.nanoTime()) + "-" + i;
-            batch.add(new Document()
-                    .append("name", "Synthetic Buyer " + i)
-                    .append("email", "buyer" + i + "-" + suffix + "@example.com")
-                    .append("account_type", BUYER_TYPE)
-                    .append("postcode_interest", new ArrayList<>(picks)));
-
-            if (batch.size() >= 1000) {
+            batch.add(synthesizeBuyer(rand, i));
+            if (batch.size() >= BATCH_SIZE) {
                 coll.insertMany(batch);
                 batch.clear();
             }
         }
-        if (!batch.isEmpty()) coll.insertMany(batch);
+        if (!batch.isEmpty()) {
+            coll.insertMany(batch);
+        }
         return count;
+    }
+
+    private static Document synthesizeBuyer(Random rand, int index) {
+        int numPostcodes = rand.nextInt(MAX_POSTCODES + 1);
+        Set<String> picks = new LinkedHashSet<>();
+        int attempts = 0;
+        while (picks.size() < numPostcodes && attempts < SEED_MAX_ATTEMPTS) {
+            picks.add(String.format("%04d", randomNswPostcode(rand)));
+            attempts++;
+        }
+        String suffix = Long.toHexString(System.nanoTime()) + "-" + index;
+        return new Document()
+                .append("name", "Synthetic Buyer " + index)
+                .append("email", "buyer" + index + "-" + suffix + "@example.com")
+                .append(FIELD_ACCOUNT_TYPE, BUYER_TYPE)
+                .append(FIELD_POSTCODE_INTEREST, new ArrayList<>(picks));
     }
 
     private static int randomNswPostcode(Random rand) {
@@ -177,21 +202,29 @@ public class PurchaserDAO {
     }
 
     private List<String> sanitizePostcodes(List<String> in) {
-        if (in == null) return new ArrayList<>();
+        if (in == null) {
+            return new ArrayList<>();
+        }
         Set<String> seen = new LinkedHashSet<>();
         for (String p : in) {
-            if (p == null) continue;
+            if (p == null) {
+                continue;
+            }
             String t = p.trim();
-            if (!isValidNswPostcode(t)) return null;
+            if (!isValidNswPostcode(t)) {
+                return null;
+            }
             seen.add(t);
-            if (seen.size() > MAX_POSTCODES) return null;
+            if (seen.size() > MAX_POSTCODES) {
+                return null;
+            }
         }
         return new ArrayList<>(seen);
     }
 
     private Purchaser toPurchaser(Document d) {
-        String id = d.getObjectId("_id").toHexString();
-        List<String> postcodes = d.getList("postcode_interest", String.class, Collections.emptyList());
+        String id = d.getObjectId(FIELD_ID).toHexString();
+        List<String> postcodes = d.getList(FIELD_POSTCODE_INTEREST, String.class, Collections.emptyList());
         return new Purchaser(id, d.getString("name"), d.getString("email"), new ArrayList<>(postcodes));
     }
 
