@@ -1,9 +1,9 @@
 package notify;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
+import app.Mongo;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
@@ -27,20 +27,13 @@ import java.util.Set;
  */
 public class NotifyDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
-
     private final MongoCollection<Document> listings;
     private final MongoCollection<Document> pricing;
     private final MongoCollection<Document> properties;
     private final MongoCollection<Document> accounts;
 
     public NotifyDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
+        MongoDatabase db = Mongo.db();
         this.listings = db.getCollection("listings");
         this.pricing = db.getCollection("property_pricing_updates");
         this.properties = db.getCollection("properties");
@@ -49,28 +42,39 @@ public class NotifyDAO {
 
     /** Postcode → list of for-sale properties in that postcode. */
     public Map<String, List<PropertyForSale>> buildPostcodeIndex() {
-        // 1. All active listings → set of property ObjectIds for sale.
-        Set<ObjectId> forSalePids = new HashSet<>();
-        for (Document l : listings.find()) {
-            ObjectId pid = l.getObjectId("pid");
-            if (pid != null) forSalePids.add(pid);
-        }
+        Set<ObjectId> forSalePids = fetchForSalePids();
         if (forSalePids.isEmpty()) return Collections.emptyMap();
 
-        // 2. Latest price per pid, in one aggregation pass.
-        //    sort by date desc, then group taking the first updated_price.
-        Map<ObjectId, Double> latestPriceByPid = new HashMap<>();
+        Map<ObjectId, Double> latestPriceByPid = fetchLatestPrices(forSalePids);
+        return buildIndexByPostcode(forSalePids, latestPriceByPid);
+    }
+
+    private Set<ObjectId> fetchForSalePids() {
+        Set<ObjectId> pids = new HashSet<>();
+        for (Document l : listings.find()) {
+            ObjectId pid = l.getObjectId("pid");
+            if (pid != null) pids.add(pid);
+        }
+        return pids;
+    }
+
+    // Latest price per pid in one aggregation pass: sort by date desc,
+    // then group taking the first updated_price per pid.
+    private Map<ObjectId, Double> fetchLatestPrices(Set<ObjectId> pids) {
+        Map<ObjectId, Double> latest = new HashMap<>();
         for (Document d : pricing.aggregate(Arrays.asList(
-                Aggregates.match(Filters.in("pid", forSalePids)),
+                Aggregates.match(Filters.in("pid", pids)),
                 Aggregates.sort(Sorts.descending("date")),
-                Aggregates.group("$pid",
-                        com.mongodb.client.model.Accumulators.first("price", "$updated_price"))))) {
+                Aggregates.group("$pid", Accumulators.first("price", "$updated_price"))))) {
             ObjectId pid = d.getObjectId("_id");
             Double price = d.getDouble("price");
-            if (pid != null && price != null) latestPriceByPid.put(pid, price);
+            if (pid != null && price != null) latest.put(pid, price);
         }
+        return latest;
+    }
 
-        // 3. Property metadata (postcode, property_id) for every for-sale pid.
+    private Map<String, List<PropertyForSale>> buildIndexByPostcode(
+            Set<ObjectId> forSalePids, Map<ObjectId, Double> latestPriceByPid) {
         Map<String, List<PropertyForSale>> index = new HashMap<>();
         for (Document p : properties.find(Filters.in("_id", forSalePids))) {
             ObjectId pid = p.getObjectId("_id");

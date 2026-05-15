@@ -10,6 +10,9 @@ target/
 # Local data (CSV is 611MB — never commit)
 data/
 
+# ck static-analysis tool (built locally) and its output
+tools/
+
 # IDE
 .idea/
 *.iml

@@ -1,6 +1,7 @@
 package property;
 
 import io.javalin.http.Context;
+import web.Html;
 
 import java.util.List;
 import java.util.Optional;
@@ -80,22 +81,22 @@ public class PropertyController {
         }
     }
 
-    private String propertyListHtml(String title, List<Property> props) {
+    private static String propertyListHtml(String title, List<Property> props) {
         StringBuilder sb = new StringBuilder();
-        sb.append("<!DOCTYPE html><html><head><title>").append(title).append("</title></head><body>");
-        sb.append("<h1>").append(title).append("</h1>");
+        sb.append("<!DOCTYPE html><html><head><title>").append(Html.escape(title)).append("</title></head><body>");
+        sb.append("<h1>").append(Html.escape(title)).append("</h1>");
         sb.append("<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">");
         sb.append("<tr><th>Property ID</th><th>Postcode</th><th>Address</th><th>Council</th>")
           .append("<th>Type</th><th>Last Sale</th><th>Price</th><th>For Sale</th></tr>");
         for (Property p : props) {
             sb.append("<tr>")
-              .append("<td>").append(safe(p.propertyID)).append("</td>")
-              .append("<td>").append(safe(p.postcode)).append("</td>")
-              .append("<td>").append(safe(p.address)).append("</td>")
-              .append("<td>").append(safe(p.councilName)).append("</td>")
-              .append("<td>").append(safe(p.propertyType)).append("</td>")
-              .append("<td>").append(safe(p.contractDate)).append("</td>")
-              .append("<td>").append(safe(p.propertyPrice)).append("</td>")
+              .append("<td>").append(Html.escape(p.propertyID)).append("</td>")
+              .append("<td>").append(Html.escape(p.postcode)).append("</td>")
+              .append("<td>").append(Html.escape(p.address)).append("</td>")
+              .append("<td>").append(Html.escape(p.councilName)).append("</td>")
+              .append("<td>").append(Html.escape(p.propertyType)).append("</td>")
+              .append("<td>").append(Html.escape(p.contractDate)).append("</td>")
+              .append("<td>").append(Html.escape(p.propertyPrice)).append("</td>")
               .append("<td>").append(p.forSale).append("</td>")
               .append("</tr>");
         }
@@ -103,12 +104,7 @@ public class PropertyController {
         return sb.toString();
     }
 
-    private static String safe(String s) {
-        return s == null ? "" : s;
-    }
-
-    private String errorHtml(String message) {
-        return "<!DOCTYPE html><html><head><title>Error</title></head><body>"
-             + "<h1>Error</h1><p>" + message + "</p></body></html>";
+    private static String errorHtml(String message) {
+        return Html.errorPage(message);
     }
 }

@@ -1,6 +1,7 @@
 package purchaser;
 
 import io.javalin.http.Context;
+import web.Html;
 
 import java.util.List;
 import java.util.Optional;
@@ -110,15 +111,15 @@ public class PurchaserController {
 
     private static String purchaserTableHtml(String title, List<Purchaser> list) {
         StringBuilder sb = new StringBuilder();
-        sb.append("<!DOCTYPE html><html><head><title>").append(title).append("</title></head><body>");
-        sb.append("<h1>").append(title).append("</h1>");
+        sb.append("<!DOCTYPE html><html><head><title>").append(Html.escape(title)).append("</title></head><body>");
+        sb.append("<h1>").append(Html.escape(title)).append("</h1>");
         sb.append("<table border='1' cellpadding='6' cellspacing='0'>");
         sb.append("<tr><th>Purchaser ID</th><th>Name</th><th>Email</th><th>Postcodes</th></tr>");
         for (Purchaser p : list) {
             sb.append("<tr>")
                     .append("<td>").append(p.purchaserId).append("</td>")
-                    .append("<td>").append(escape(p.name)).append("</td>")
-                    .append("<td>").append(escape(p.email)).append("</td>")
+                    .append("<td>").append(Html.escape(p.name)).append("</td>")
+                    .append("<td>").append(Html.escape(p.email)).append("</td>")
                     .append("<td>").append(String.join(", ", p.postcodes)).append("</td>")
                     .append("</tr>");
         }
@@ -130,8 +131,8 @@ public class PurchaserController {
         StringBuilder sb = new StringBuilder();
         sb.append("<!DOCTYPE html><html><body>");
         sb.append("<h1>Purchaser ").append(p.purchaserId).append("</h1>");
-        sb.append("<p><b>Name:</b> ").append(escape(p.name)).append("</p>");
-        sb.append("<p><b>Email:</b> ").append(escape(p.email)).append("</p>");
+        sb.append("<p><b>Name:</b> ").append(Html.escape(p.name)).append("</p>");
+        sb.append("<p><b>Email:</b> ").append(Html.escape(p.email)).append("</p>");
         sb.append("<h3>Postcodes of interest</h3>");
         if (p.postcodes.isEmpty()) {
             sb.append("<p>None</p>");
@@ -145,12 +146,7 @@ public class PurchaserController {
     }
 
     private static String errorHtml(String msg) {
-        return "<!DOCTYPE html><html><body><h1>Error</h1><p>" + escape(msg) + "</p></body></html>";
-    }
-
-    private static String escape(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return Html.errorPage(msg);
     }
 
     public static class CreateRequest {

@@ -1,9 +1,7 @@
 package purchaser;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
+import app.Mongo;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import com.mongodb.client.result.UpdateResult;
@@ -35,7 +33,6 @@ import java.util.Set;
  */
 public class PurchaserDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
     private static final String COLLECTION_NAME = "accounts";
     private static final String BUYER_TYPE = "Buyer";
     private static final int MAX_RESULTS = 1000;
@@ -51,13 +48,7 @@ public class PurchaserDAO {
     private final MongoCollection<Document> coll;
 
     public PurchaserDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
-        this.coll = db.getCollection(COLLECTION_NAME);
+        this.coll = Mongo.db().getCollection(COLLECTION_NAME);
     }
 
     public static boolean isValidNswPostcode(String pc) {
@@ -143,32 +134,41 @@ public class PurchaserDAO {
         return r.getModifiedCount() == 1;
     }
 
+    private static final int SEED_BATCH_SIZE = 1000;
+
     /** Bulk-insert N synthetic Buyer accounts each with 0..5 random NSW postcodes. */
     public int seedPurchasers(int count) {
         Random rand = new Random();
         List<Document> batch = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            int numPostcodes = rand.nextInt(MAX_POSTCODES + 1); // 0..5
-            Set<String> picks = new LinkedHashSet<>();
-            int attempts = 0;
-            while (picks.size() < numPostcodes && attempts < 50) {
-                picks.add(String.format("%04d", randomNswPostcode(rand)));
-                attempts++;
-            }
-            String suffix = Long.toHexString(System.nanoTime()) + "-" + i;
-            batch.add(new Document()
-                    .append("name", "Synthetic Buyer " + i)
-                    .append("email", "buyer" + i + "-" + suffix + "@example.com")
-                    .append("account_type", BUYER_TYPE)
-                    .append("postcode_interest", new ArrayList<>(picks)));
-
-            if (batch.size() >= 1000) {
+            batch.add(syntheticBuyer(i, rand));
+            if (batch.size() >= SEED_BATCH_SIZE) {
                 coll.insertMany(batch);
                 batch.clear();
             }
         }
         if (!batch.isEmpty()) coll.insertMany(batch);
         return count;
+    }
+
+    private static Document syntheticBuyer(int i, Random rand) {
+        String suffix = Long.toHexString(System.nanoTime()) + "-" + i;
+        return new Document()
+                .append("name", "Synthetic Buyer " + i)
+                .append("email", "buyer" + i + "-" + suffix + "@example.com")
+                .append("account_type", BUYER_TYPE)
+                .append("postcode_interest", randomPostcodes(rand));
+    }
+
+    private static List<String> randomPostcodes(Random rand) {
+        int target = rand.nextInt(MAX_POSTCODES + 1); // 0..5
+        Set<String> picks = new LinkedHashSet<>();
+        int attempts = 0;
+        while (picks.size() < target && attempts < 50) {
+            picks.add(String.format("%04d", randomNswPostcode(rand)));
+            attempts++;
+        }
+        return new ArrayList<>(picks);
     }
 
     private static int randomNswPostcode(Random rand) {

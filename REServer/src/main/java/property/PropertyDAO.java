@@ -1,10 +1,8 @@
 package property;
 
+import app.Mongo;
 import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import org.bson.Document;
@@ -16,22 +14,13 @@ import java.util.Optional;
 
 public class PropertyDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
-    private static final String COLLECTION_NAME = "properties";
-
     // Cap unbounded queries so a single request can't try to ship millions of rows.
     private static final int MAX_RESULTS = 1000;
 
     private final MongoCollection<Document> coll;
 
     public PropertyDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
-        this.coll = db.getCollection(COLLECTION_NAME);
+        this.coll = Mongo.db().getCollection("properties");
     }
 
     public boolean newProperty(Property property) {

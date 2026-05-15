@@ -1,6 +1,7 @@
 package notify;
 
 import io.javalin.http.Context;
+import web.Html;
 
 import java.util.List;
 import java.util.Map;
@@ -69,16 +70,16 @@ public class NotifyController {
             sb.append("<p class=\"empty\">No purchaser had a matching property in their watched postcodes.</p>");
         }
         for (Notification n : notifications) {
-            sb.append("<h2>").append(escape(n.purchaserName)).append("</h2>");
+            sb.append("<h2>").append(Html.escape(n.purchaserName)).append("</h2>");
             sb.append("<p class=\"meta\">")
-              .append(escape(n.purchaserEmail))
-              .append(" · id ").append(escape(n.purchaserId))
-              .append(" · watching ").append(escape(String.join(", ", n.watchedPostcodes)))
+              .append(Html.escape(n.purchaserEmail))
+              .append(" · id ").append(Html.escape(n.purchaserId))
+              .append(" · watching ").append(Html.escape(String.join(", ", n.watchedPostcodes)))
               .append("</p>");
             sb.append("<table><tr><th>Property ID</th><th>Postcode</th><th>Price</th></tr>");
             for (PropertyForSale p : n.matches) {
                 sb.append("<tr><td>").append(p.propertyId)
-                  .append("</td><td>").append(escape(p.postcode))
+                  .append("</td><td>").append(Html.escape(p.postcode))
                   .append("</td><td>$").append(String.format("%,.0f", p.price))
                   .append("</td></tr>");
             }
@@ -88,8 +89,4 @@ public class NotifyController {
         return sb.toString();
     }
 
-    private static String escape(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-    }
 }

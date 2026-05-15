@@ -1,6 +1,7 @@
 package listing;
 
 import io.javalin.http.Context;
+import web.Html;
 
 import java.util.List;
 import java.util.Optional;
@@ -111,7 +112,7 @@ public class ListingController {
     }
 
     private static String errorHtml(String msg) {
-        return "<html><body><p>" + msg + "</p></body></html>";
+        return Html.errorPage(msg);
     }
 
     public static class PriceUpdateRequest {

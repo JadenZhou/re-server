@@ -1,8 +1,7 @@
 package listing;
 
+import app.Mongo;
 import com.mongodb.client.AggregateIterable;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Aggregates;
@@ -19,7 +18,6 @@ import java.util.Optional;
 
 public class ListingDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
     private static final int MAX_RESULTS = 1000;
 
     private final MongoCollection<Document> listingsColl;
@@ -27,12 +25,7 @@ public class ListingDAO {
     private final MongoCollection<Document> propertiesColl;
 
     public ListingDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
+        MongoDatabase db = Mongo.db();
         this.listingsColl = db.getCollection("listings");
         this.pricingColl = db.getCollection("property_pricing_updates");
         this.propertiesColl = db.getCollection("properties");
