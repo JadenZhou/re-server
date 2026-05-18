@@ -21,6 +21,12 @@
       "value": "REPLACE_AFTER_REGISTER",
       "type": "string",
       "description": "Paste the id returned by `POST /purchaser` here."
+    },
+    {
+      "key": "propertyID",
+      "value": "1",
+      "type": "string",
+      "description": "Pick any property_id visible in the `GET /property` HTML page, paste it here, then run `GET /property/{propertyID}` repeatedly to see view_count climb."
     }
   ],
   "item": [
@@ -40,7 +46,19 @@
       "name": "1. Properties",
       "item": [
         {
-          "name": "GET /property/postcode/{postcode}",
+          "name": "GET /property/{propertyID} (bumps view_count)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/property/{{propertyID}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["property", "{{propertyID}}"]
+            },
+            "description": "Returns the most-recent sale row for this property_id AND atomically increments `view_count` on every row sharing that id. Send this 3× — the `Views` column climbs 1 → 2 → 3."
+          }
+        },
+        {
+          "name": "GET /property/postcode/{postcode} (bumps postcode counter)",
           "request": {
             "method": "GET",
             "url": {
@@ -48,7 +66,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["property", "postcode", "2770"]
             },
-            "description": "All historical sales in postcode 2770."
+            "description": "All historical sales in postcode 2770. On non-empty results, increments `postcode_stats.search_count` for 2770 (see `GET /stats/postcode/2770`)."
           }
         },
         {
@@ -186,7 +204,7 @@
           }
         },
         {
-          "name": "GET /purchaser/postcode/{postcode}",
+          "name": "GET /purchaser/postcode/{postcode} (bumps postcode counter)",
           "request": {
             "method": "GET",
             "url": {
@@ -194,7 +212,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["purchaser", "postcode", "2770"]
             },
-            "description": "All buyers interested in postcode 2770 — primitive for listing-alert features."
+            "description": "All buyers interested in postcode 2770 — primitive for listing-alert features. On non-empty results, also increments `postcode_stats.search_count` (same counter as the property-postcode endpoint — both signal interest in the postcode)."
           }
         },
         {
@@ -251,6 +269,53 @@
               "path": ["purchaser", "seed"]
             },
             "description": "Bulk-insert synthetic Buyer accounts with random 0-5 postcode interests."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Stats (ex5)",
+      "item": [
+        {
+          "name": "GET /stats/postcode/{postcode}",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/stats/postcode/2770",
+              "host": ["{{baseUrl}}"],
+              "path": ["stats", "postcode", "2770"]
+            },
+            "description": "Returns `{postcode, searchCount}` from the `postcode_stats` collection. Counter is bumped by `GET /property/postcode/{pc}` and `GET /purchaser/postcode/{pc}` (both = interest signal). Run those a few times, then this, to see the count."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Notify",
+      "item": [
+        {
+          "name": "GET /notify (HTML)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/notify",
+              "host": ["{{baseUrl}}"],
+              "path": ["notify"]
+            },
+            "description": "Notification report — for each Buyer with watched postcodes, lists the for-sale properties in those postcodes (id + latest price)."
+          }
+        },
+        {
+          "name": "GET /notify?format=text",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/notify?format=text",
+              "host": ["{{baseUrl}}"],
+              "path": ["notify"],
+              "query": [{ "key": "format", "value": "text" }]
+            },
+            "description": "Plain-text version of the notification report — easier to scan for large outputs."
           }
         }
       ]

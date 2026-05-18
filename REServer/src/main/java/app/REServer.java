@@ -10,13 +10,17 @@ import property.PropertyController;
 import property.PropertyDAO;
 import purchaser.PurchaserController;
 import purchaser.PurchaserDAO;
+import stats.MongoPostcodeStats;
+import stats.PostcodeStats;
 
 public class REServer {
 
     public static void main(String[] args) {
-        PropertyController propertyHandler = new PropertyController(new PropertyDAO());
+        PostcodeStats postcodeStats = new MongoPostcodeStats();
+
+        PropertyController propertyHandler = new PropertyController(new PropertyDAO(), postcodeStats);
         ListingController listingHandler = new ListingController(new ListingDAO());
-        PurchaserController purchaserHandler = new PurchaserController(new PurchaserDAO());
+        PurchaserController purchaserHandler = new PurchaserController(new PurchaserDAO(), postcodeStats);
         NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
 
         Javalin app = Javalin.create()
@@ -27,6 +31,10 @@ public class REServer {
         registerListingRoutes(app, listingHandler);
         registerPurchaserRoutes(app, purchaserHandler);
         app.get("/notify", notifyHandler::notify);
+        app.get("/stats/postcode/{postcode}", ctx -> {
+            String pc = ctx.pathParam("postcode");
+            ctx.json(java.util.Map.of("postcode", pc, "searchCount", postcodeStats.getSearchCount(pc)));
+        });
     }
 
     // Property records are immutable, so no PUT or DELETE.

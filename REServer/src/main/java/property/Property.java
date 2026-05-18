@@ -16,6 +16,7 @@ public class Property {
     public String councilName;
     public String propertyType;
     public String contractDate;
+    public long viewCount;
 
     public Property() {}
 

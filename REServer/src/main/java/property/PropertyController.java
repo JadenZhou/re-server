@@ -1,6 +1,7 @@
 package property;
 
 import io.javalin.http.Context;
+import stats.PostcodeStats;
 import web.Html;
 
 import java.util.List;
@@ -9,9 +10,11 @@ import java.util.Optional;
 public class PropertyController {
 
     private final PropertyDAO properties;
+    private final PostcodeStats postcodeStats;
 
-    public PropertyController(PropertyDAO properties) {
+    public PropertyController(PropertyDAO properties, PostcodeStats postcodeStats) {
         this.properties = properties;
+        this.postcodeStats = postcodeStats;
     }
 
     // implements POST /property
@@ -61,6 +64,10 @@ public class PropertyController {
     public void getPropertyByID(Context ctx, String id) {
         Optional<Property> property = properties.getPropertyById(id);
         if (property.isPresent()) {
+            // Bump the view count and reflect the new value in the response,
+            // so the displayed count is post-increment (matches what was just persisted).
+            long newCount = properties.incrementViewCount(id);
+            property.get().viewCount = newCount;
             ctx.html(propertyListHtml("Property " + id, List.of(property.get())));
             ctx.status(200);
         } else {
@@ -76,6 +83,8 @@ public class PropertyController {
             ctx.html(errorHtml("No properties for postcode found"));
             ctx.status(404);
         } else {
+            // Searching properties by postcode signals interest in that postcode.
+            postcodeStats.incrementSearch(postCode);
             ctx.html(propertyListHtml("Properties in Postcode " + postCode, result));
             ctx.status(200);
         }
@@ -87,7 +96,7 @@ public class PropertyController {
         sb.append("<h1>").append(Html.escape(title)).append("</h1>");
         sb.append("<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\">");
         sb.append("<tr><th>Property ID</th><th>Postcode</th><th>Address</th><th>Council</th>")
-          .append("<th>Type</th><th>Last Sale</th><th>Price</th><th>For Sale</th></tr>");
+          .append("<th>Type</th><th>Last Sale</th><th>Price</th><th>For Sale</th><th>Views</th></tr>");
         for (Property p : props) {
             sb.append("<tr>")
               .append("<td>").append(Html.escape(p.propertyID)).append("</td>")
@@ -98,6 +107,7 @@ public class PropertyController {
               .append("<td>").append(Html.escape(p.contractDate)).append("</td>")
               .append("<td>").append(Html.escape(p.propertyPrice)).append("</td>")
               .append("<td>").append(p.forSale).append("</td>")
+              .append("<td>").append(p.viewCount).append("</td>")
               .append("</tr>");
         }
         sb.append("</table></body></html>");

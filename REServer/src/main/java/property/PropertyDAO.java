@@ -5,6 +5,7 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
@@ -50,6 +51,21 @@ public class PropertyDAO {
         return Optional.ofNullable(d).map(PropertyDAO::toProperty);
     }
 
+    /**
+     * Atomically bumps view_count on every sale row sharing this property_id,
+     * so any subsequent read sees the same total. Returns the new count, or 0
+     * if the property doesn't exist (no rows match) / the id is malformed.
+     */
+    public long incrementViewCount(String propertyID) {
+        Long id = parseLongOrNull(propertyID);
+        if (id == null) return 0;
+        coll.updateMany(Filters.eq("property_id", id), Updates.inc("view_count", 1L));
+        Document d = coll.find(Filters.eq("property_id", id)).first();
+        if (d == null) return 0;
+        Long n = d.getLong("view_count");
+        return n == null ? 0 : n;
+    }
+
     public List<Property> getPropertiesByPostCode(String postCode) {
         return collect(coll.find(Filters.eq("post_code", postCode)).limit(MAX_RESULTS));
     }
@@ -93,6 +109,8 @@ public class PropertyDAO {
         p.contractDate = d.getString("contract_date");
         Boolean forSale = d.getBoolean("for_sale");
         p.forSale = forSale != null && forSale;
+        Long views = d.getLong("view_count");
+        p.viewCount = views == null ? 0 : views;
         return p;
     }
 

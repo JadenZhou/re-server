@@ -1,6 +1,7 @@
 package purchaser;
 
 import io.javalin.http.Context;
+import stats.PostcodeStats;
 import web.Html;
 
 import java.util.List;
@@ -9,9 +10,11 @@ import java.util.Optional;
 public class PurchaserController {
 
     private final PurchaserDAO dao;
+    private final PostcodeStats postcodeStats;
 
-    public PurchaserController(PurchaserDAO dao) {
+    public PurchaserController(PurchaserDAO dao, PostcodeStats postcodeStats) {
         this.dao = dao;
+        this.postcodeStats = postcodeStats;
     }
 
     public void createPurchaser(Context ctx) {
@@ -60,6 +63,9 @@ public class PurchaserController {
             ctx.html(errorHtml("No purchasers interested in postcode " + postcode));
             ctx.status(404);
         } else {
+            // Searching purchasers by postcode is also a signal of interest
+            // in that postcode (someone asking "who watches this area?").
+            postcodeStats.incrementSearch(postcode);
             ctx.html(purchaserTableHtml("Purchasers interested in " + postcode, list));
             ctx.status(200);
         }
