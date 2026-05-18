@@ -1,5 +1,7 @@
 package property;
 
+import org.bson.types.ObjectId;
+
 /**
  * Property record. Source documents in `properties` are immutable sale rows
  * (same `property_id` may appear multiple times — one row per sale). Fields
@@ -8,7 +10,7 @@ package property;
  * type, and most-recent contract date without going back to Mongo.
  */
 public class Property {
-    public String propertyID;
+    public ObjectId propertyID;
     public String postcode;
     public String propertyPrice;
     public boolean forSale;
@@ -16,10 +18,11 @@ public class Property {
     public String councilName;
     public String propertyType;
     public String contractDate;
+    public long searchCount = 0;
 
     public Property() {}
 
-    public Property(String propertyID, String postcode, String propertyPrice) {
+    public Property(ObjectId propertyID, String postcode, String propertyPrice) {
         this.propertyID = propertyID;
         this.postcode = postcode;
         this.propertyPrice = propertyPrice;

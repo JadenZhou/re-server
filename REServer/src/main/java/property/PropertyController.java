@@ -89,7 +89,7 @@ public class PropertyController {
           .append("<th>Type</th><th>Last Sale</th><th>Price</th><th>For Sale</th></tr>");
         for (Property p : props) {
             sb.append("<tr>")
-              .append("<td>").append(safe(p.propertyID)).append("</td>")
+              .append("<td>").append(safe(p.propertyID.toString())).append("</td>")
               .append("<td>").append(safe(p.postcode)).append("</td>")
               .append("<td>").append(safe(p.address)).append("</td>")
               .append("<td>").append(safe(p.councilName)).append("</td>")
