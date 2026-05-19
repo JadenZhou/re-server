@@ -26,8 +26,11 @@ adapt.
 | Tests passing | 7/7 (`NotifyServiceTest`) | 7/7 (no test changes needed) |
 | Public HTTP API | unchanged | unchanged |
 
-Lines changed: **+1260 / −620** across **16 files** (one commit:
-`ea3497b feat(db): swap MongoDB for SQLite on alternate/db branch`).
+Lines changed: **+1400 / −620** across **17 files** on three commits:
+
+- `ea3497b` feat(db): swap MongoDB for SQLite on alternate/db branch
+- `d97d735` docs: add ALTERNATE_DB.md summarizing the swap
+- `7c30210` feat: add /stats endpoint and LOADER_LIMIT for faster demos
 
 ---
 
@@ -50,6 +53,7 @@ Lines changed: **+1260 / −620** across **16 files** (one commit:
 | `ListingDAO` | Listings + per-listing price history + `seedListings()` sampling | All multi-statement operations wrap a transaction (`setAutoCommit(false)` / `commit` / rollback on failure); the `seed` path batches 1000 inserts |
 | `PurchaserDAO` | Buyer accounts + watched-postcode interests | NSW-postcode range validation preserved; postcode array → `postcode_interest` junction table with FK on `accounts.id` (CASCADE) |
 | `NotifyDAO` | Builds the `(postcode → for-sale property list)` index that `NotifyService` consumes | Single SQL JOIN with a correlated subquery picks the latest `listing_prices` row per listing in one round trip |
+| `StatsController` | `GET /stats` — JSON snapshot of row counts per table, top postcodes by `search_count`, top properties by `search_count`, total searches, for-sale counts | One curl exercises every table the audit hooks touch — useful for a live demo |
 
 ### 3. Rewritten CSV loader
 
@@ -62,6 +66,9 @@ Lines changed: **+1260 / −620** across **16 files** (one commit:
    - `INSERT INTO properties` with a freshly generated hex `id`.
 4. Commits every 1000 rows inside one transaction (~25k rows/sec on WAL).
 5. Prints progress and a final `inserted / parse-errors / rows-per-second` summary.
+6. Honors `LOADER_LIMIT=N` env var — stops after `N` rows so a demo can
+   ingest a small slice (e.g. 50k rows in ~3s) without waiting on the full
+   ~611MB / ~1M-row file.
 
 ### 4. Schema (normalized, FKs enabled)
 
@@ -132,34 +139,40 @@ runs 7 cases in ~30ms — all pass, no DB needed.
 ### End-to-end smoke (commands I ran against this commit)
 
 ```bash
-# 1. Load a tiny synthetic CSV.
-SQLITE_PATH=/tmp/loader.db RE_CSV_PATH=/tmp/test.csv \
+# 1. Load 50k rows of the real NSW CSV (~3s).
+SQLITE_PATH=./data/re-server.db \
+RE_CSV_PATH=./data/nsw_property_data.csv \
+LOADER_LIMIT=50000 \
   java -jar REDataLoader/target/RealEstate-1.0-SNAPSHOT-jar-with-dependencies.jar
-# → "Inserted 4 rows in 0.4s ... Parse errors: 0"
+# → "Inserted 50000 rows in 3.1s (~16,000 rows/sec). Parse errors: 0"
 
 # 2. Start the server against the same DB file.
-SQLITE_PATH=/tmp/loader.db \
+SQLITE_PATH=./data/re-server.db \
   java -jar REServer/target/REServer-1.0-SNAPSHOT-jar-with-dependencies.jar &
 
 # 3. Hit every group of endpoints.
 curl   http://localhost:7070/                                   # 200, health
-curl   http://localhost:7070/property                           # 200, 4 rows
-curl   http://localhost:7070/property/postcode/2000             # 200, 2 rows
+curl   http://localhost:7070/property                           # 200, HTML
+curl  'http://localhost:7070/property?minPrice=1000000&maxPrice=2000000'
+curl   http://localhost:7070/property/postcode/2000             # 200
 curl   http://localhost:7070/property/<24-char-hex-id>          # 200 + audit
+curl -XPOST  http://localhost:7070/listing/seed                 # 201, 1000 listings
+curl -XPOST 'http://localhost:7070/purchaser/seed?count=100'    # 201
 curl -XPOST  -H 'Content-Type: application/json' \
        -d '{"propertyObjId":"<id>","price":1750000}' \
        http://localhost:7070/listing                            # 201
-curl -XPOST  -H 'Content-Type: application/json' \
-       -d '{"name":"Alice","email":"a@x.com","postcodes":["2000"]}' \
-       http://localhost:7070/purchaser                          # 201 + id
 curl  'http://localhost:7070/notify?format=text'                # 200
+
+# 4. One-shot stats: row counts + top postcodes/properties by search_count.
+curl -s http://localhost:7070/stats | python3 -m json.tool
 ```
 
 Confirmed live:
 
 - `properties.search_count` and `postcodes.search_count` incrementing per read
 - New listing created → `properties.for_sale` flipped to 1 in same txn
-- `/notify` returned Alice's match (property 1002 listed at $1.75M in 2000)
+- `/notify` returned matches for buyers whose watched postcodes had for-sale listings
+- `/stats` reflected each curl in real time (top postcodes ordered by search_count)
 
 ---
 
@@ -190,6 +203,8 @@ REServer/
 └── src/main/java/
     ├── db/Db.java                                    # NEW: shared connection
     ├── db/ObjectIdLike.java                          # NEW: hex ID generator
+    ├── stats/StatsController.java                    # NEW: GET /stats
+    ├── app/REServer.java                             # routes + DAO wiring
     ├── property/Property.java                        # ObjectId → String
     ├── property/PropertyDAO.java                     # rewritten on JDBC
     ├── listing/ListingDAO.java                       # rewritten on JDBC

@@ -123,6 +123,18 @@ SQLITE_PATH=../re-server.db RE_CSV_PATH=../data/nsw_property_data.csv \
   java -jar target/*-jar-with-dependencies.jar
 ```
 
+For a fast demo, cap the row count with `LOADER_LIMIT`:
+
+```bash
+SQLITE_PATH=./data/re-server.db \
+RE_CSV_PATH=./data/nsw_property_data.csv \
+LOADER_LIMIT=50000 \
+  java -jar REDataLoader/target/RealEstate-1.0-SNAPSHOT-jar-with-dependencies.jar
+```
+
+The full CSV (~1M rows) loads in tens of seconds. 50k rows loads in ~3s
+and is enough to exercise every endpoint.
+
 ---
 
 ## API reference
@@ -149,6 +161,7 @@ Base URL: `http://localhost:7070`
 | DELETE | `/purchaser/{purchaserID}/interest/{postcode}` | Remove a watched postcode |
 | POST | `/purchaser/seed` | Seed synthetic buyers (default 10,000) |
 | GET  | `/notify` | Notification report for buyers with for-sale matches |
+| GET  | `/stats` | JSON snapshot: row counts per table + top postcodes/properties by search_count |
 
 ### Examples
 
@@ -157,6 +170,28 @@ curl http://localhost:7070/
 curl http://localhost:7070/property
 curl "http://localhost:7070/property?minPrice=1000000&maxPrice=3000000"
 curl http://localhost:7070/property/postcode/2000
+
+# at-a-glance stats (counts + top postcodes/properties by search_count)
+curl -s http://localhost:7070/stats | python3 -m json.tool
+```
+
+Sample `/stats` response:
+
+```json
+{
+  "counts": {
+    "properties": 50000, "listings": 1000, "listing_prices": 1000,
+    "accounts": 100, "postcode_interest": 247, "postcodes": 624, "purchases": 0
+  },
+  "topPostcodesBySearch": [
+    {"postcode": "2000", "searchCount": 14},
+    {"postcode": "2031", "searchCount": 7}
+  ],
+  "topPropertiesBySearch": [...],
+  "totalSearches": 21,
+  "forSaleListings": 1000,
+  "propertiesForSale": 1000
+}
 ```
 
 `POST /property` expects JSON like:
