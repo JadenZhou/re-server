@@ -10,6 +10,7 @@ import property.PropertyController;
 import property.PropertyDAO;
 import purchaser.PurchaserController;
 import purchaser.PurchaserDAO;
+import stats.StatsController;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +32,8 @@ public class REServer {
             PurchaserController purchaserHandler = new PurchaserController(purchasers);
 
             NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
+
+            StatsController statsHandler = new StatsController();
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -75,6 +78,9 @@ public class REServer {
                 // Notification report — for each Buyer with watched postcodes,
                 // list the for-sale properties in those postcodes (ID + price).
                 app.get("/notify", ctx -> notifyHandler.notify(ctx));
+
+                // At-a-glance DB stats (row counts + top postcodes by search_count).
+                app.get("/stats", ctx -> statsHandler.stats(ctx));
             });
 
 

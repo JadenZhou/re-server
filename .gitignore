@@ -10,6 +10,11 @@ target/
 # Local data (CSV is 611MB — never commit)
 data/
 
+# SQLite files left in module dirs when run with default SQLITE_PATH
+*.db
+*.db-shm
+*.db-wal
+
 # IDE
 .idea/
 *.iml

@@ -39,8 +39,10 @@ public class Main {
     public static void main(String[] args) throws IOException {
         String sqlitePath = System.getenv().getOrDefault("SQLITE_PATH", DEFAULT_DB);
         String csvPath = System.getenv().getOrDefault("RE_CSV_PATH", DEFAULT_CSV);
+        long limit = parseLimit(System.getenv("LOADER_LIMIT"));
         Path csvFilePath = Paths.get(csvPath);
-        System.out.println("Loading CSV: " + csvFilePath + " → SQLite: " + sqlitePath);
+        System.out.println("Loading CSV: " + csvFilePath + " → SQLite: " + sqlitePath
+                + (limit > 0 ? " (limit=" + limit + ")" : ""));
 
         long start = System.currentTimeMillis();
         long inserted = 0;
@@ -70,6 +72,7 @@ public class Main {
 
                 int batchCount = 0;
                 for (CSVRecord record : parser) {
+                    if (limit > 0 && inserted + batchCount >= limit) break;
                     Row row = toRow(record);
                     if (row == null) {
                         parseErrors++;
@@ -156,6 +159,12 @@ public class Main {
 
     private static String nullIfEmpty(String v) {
         return (v == null || v.isEmpty()) ? null : v;
+    }
+
+    private static long parseLimit(String v) {
+        if (v == null || v.isEmpty()) return 0L;
+        try { return Math.max(0L, Long.parseLong(v.trim())); }
+        catch (NumberFormatException e) { return 0L; }
     }
 
     private static Long parseLongOrNull(String s) {
