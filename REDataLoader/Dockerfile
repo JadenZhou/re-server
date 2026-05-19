@@ -8,4 +8,5 @@ RUN mvn -q -B clean package -DskipTests
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /app/target/*-jar-with-dependencies.jar /app/app.jar
+VOLUME /data
 CMD ["java", "-jar", "/app/app.jar"]

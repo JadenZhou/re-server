@@ -1,16 +1,12 @@
 package purchaser;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Updates;
-import com.mongodb.client.result.UpdateResult;
-import org.bson.Document;
-import org.bson.conversions.Bson;
-import org.bson.types.ObjectId;
+import db.Db;
+import db.ObjectIdLike;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -20,23 +16,13 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * Buyers live in the shared `accounts` collection alongside other account types.
- * All queries filter `account_type = "Buyer"`. New buyers and synthetic seed
- * always set `account_type = "Buyer"` so they are visible to teammate code.
- *
- * `accounts` schema (mixed legacy + new):
- *   _id          ObjectId
- *   id           Integer    (legacy, optional)
- *   name         String
- *   email        String
- *   password     String     (legacy, optional)
- *   account_type String     ("Buyer" | "Seller" | ...)
- *   postcode_interest [String]   (may be missing on legacy docs)
+ * Buyers live in the shared `accounts` table alongside other account types.
+ * All queries filter `account_type = "Buyer"`. The Mongo branch stored
+ * watched postcodes as an array on the account doc; here they live in the
+ * `postcode_interest` junction table.
  */
 public class PurchaserDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
-    private static final String COLLECTION_NAME = "accounts";
     private static final String BUYER_TYPE = "Buyer";
     private static final int MAX_RESULTS = 1000;
     public static final int MAX_POSTCODES = 5;
@@ -46,18 +32,10 @@ public class PurchaserDAO {
             {1000, 2599}, {2619, 2899}, {2921, 2999}
     };
 
-    private static final Bson BUYER_FILTER = Filters.eq("account_type", BUYER_TYPE);
-
-    private final MongoCollection<Document> coll;
+    private final Connection c;
 
     public PurchaserDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
-        }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
-        this.coll = db.getCollection(COLLECTION_NAME);
+        this.c = Db.connection();
     }
 
     public static boolean isValidNswPostcode(String pc) {
@@ -81,94 +59,156 @@ public class PurchaserDAO {
         List<String> clean = sanitizePostcodes(postcodes);
         if (clean == null) return null;
 
-        Document d = new Document()
-                .append("name", name.trim())
-                .append("email", email.trim().toLowerCase())
-                .append("account_type", BUYER_TYPE)
-                .append("postcode_interest", clean);
-        coll.insertOne(d);
-        return d.getObjectId("_id").toHexString();
+        String id = ObjectIdLike.next();
+        try {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO accounts (id, name, email, account_type) VALUES (?, ?, ?, ?)")) {
+                ps.setString(1, id);
+                ps.setString(2, name.trim());
+                ps.setString(3, email.trim().toLowerCase());
+                ps.setString(4, BUYER_TYPE);
+                ps.executeUpdate();
+            }
+            insertInterests(id, clean);
+            c.commit();
+            return id;
+        } catch (SQLException e) {
+            rollbackQuietly();
+            // Likely unique-email collision or similar — surface as null.
+            return null;
+        } finally {
+            setAutoCommitQuietly(true);
+        }
     }
 
     public List<Purchaser> getAllPurchasers() {
         List<Purchaser> out = new ArrayList<>();
-        for (Document d : coll.find(BUYER_FILTER).limit(MAX_RESULTS)) {
-            out.add(toPurchaser(d));
+        String sql = "SELECT id, name, email FROM accounts WHERE account_type = ? LIMIT ?";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, BUYER_TYPE);
+            ps.setInt(2, MAX_RESULTS);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(loadPurchaser(rs.getString("id"), rs.getString("name"), rs.getString("email")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getAllPurchasers failed", e);
         }
         return out;
     }
 
     public Optional<Purchaser> getPurchaserById(String id) {
-        if (!ObjectId.isValid(id)) return Optional.empty();
-        Document d = coll.find(Filters.and(
-                Filters.eq("_id", new ObjectId(id)),
-                BUYER_FILTER)).first();
-        return Optional.ofNullable(d).map(this::toPurchaser);
+        if (!ObjectIdLike.isValid(id)) return Optional.empty();
+        String sql = "SELECT id, name, email FROM accounts WHERE id = ? AND account_type = ?";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, id);
+            ps.setString(2, BUYER_TYPE);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return Optional.empty();
+                return Optional.of(loadPurchaser(rs.getString("id"), rs.getString("name"), rs.getString("email")));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getPurchaserById failed", e);
+        }
     }
 
     public List<Purchaser> getPurchasersByPostcode(String postcode) {
         List<Purchaser> out = new ArrayList<>();
-        Bson filter = Filters.and(BUYER_FILTER, Filters.eq("postcode_interest", postcode));
-        for (Document d : coll.find(filter).limit(MAX_RESULTS)) {
-            out.add(toPurchaser(d));
+        String sql = "SELECT a.id, a.name, a.email FROM accounts a " +
+                "JOIN postcode_interest pi ON pi.account_id = a.id " +
+                "WHERE pi.post_code = ? AND a.account_type = ? LIMIT ?";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, postcode);
+            ps.setString(2, BUYER_TYPE);
+            ps.setInt(3, MAX_RESULTS);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(loadPurchaser(rs.getString("id"), rs.getString("name"), rs.getString("email")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getPurchasersByPostcode failed", e);
         }
         return out;
     }
 
-    /** Adds a postcode of interest. Returns OK / NOT_FOUND / INVALID_POSTCODE / DUPLICATE / LIMIT_REACHED. */
     public AddResult addInterest(String purchaserId, String postcode) {
-        if (!ObjectId.isValid(purchaserId)) return AddResult.NOT_FOUND;
+        if (!ObjectIdLike.isValid(purchaserId)) return AddResult.NOT_FOUND;
         if (!isValidNswPostcode(postcode)) return AddResult.INVALID_POSTCODE;
+        if (!buyerExists(purchaserId)) return AddResult.NOT_FOUND;
 
-        Document existing = coll.find(Filters.and(
-                Filters.eq("_id", new ObjectId(purchaserId)),
-                BUYER_FILTER)).first();
-        if (existing == null) return AddResult.NOT_FOUND;
-
-        List<String> current = existing.getList("postcode_interest", String.class, Collections.emptyList());
+        List<String> current = fetchPostcodes(purchaserId);
         if (current.contains(postcode)) return AddResult.DUPLICATE;
         if (current.size() >= MAX_POSTCODES) return AddResult.LIMIT_REACHED;
 
-        UpdateResult r = coll.updateOne(
-                Filters.eq("_id", new ObjectId(purchaserId)),
-                Updates.addToSet("postcode_interest", postcode));
-        return r.getModifiedCount() == 1 ? AddResult.OK : AddResult.NOT_FOUND;
+        Db.ensurePostcode(c, postcode);
+        try (PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO postcode_interest (account_id, post_code) VALUES (?, ?)")) {
+            ps.setString(1, purchaserId);
+            ps.setString(2, postcode);
+            int rows = ps.executeUpdate();
+            return rows == 1 ? AddResult.OK : AddResult.NOT_FOUND;
+        } catch (SQLException e) {
+            throw new RuntimeException("addInterest failed", e);
+        }
     }
 
     public boolean removeInterest(String purchaserId, String postcode) {
-        if (!ObjectId.isValid(purchaserId)) return false;
-        UpdateResult r = coll.updateOne(
-                Filters.and(Filters.eq("_id", new ObjectId(purchaserId)), BUYER_FILTER),
-                Updates.pull("postcode_interest", postcode));
-        return r.getModifiedCount() == 1;
+        if (!ObjectIdLike.isValid(purchaserId)) return false;
+        if (!buyerExists(purchaserId)) return false;
+        try (PreparedStatement ps = c.prepareStatement(
+                "DELETE FROM postcode_interest WHERE account_id = ? AND post_code = ?")) {
+            ps.setString(1, purchaserId);
+            ps.setString(2, postcode);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new RuntimeException("removeInterest failed", e);
+        }
     }
 
-    /** Bulk-insert N synthetic Buyer accounts each with 0..5 random NSW postcodes. */
     public int seedPurchasers(int count) {
         Random rand = new Random();
-        List<Document> batch = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            int numPostcodes = rand.nextInt(MAX_POSTCODES + 1); // 0..5
-            Set<String> picks = new LinkedHashSet<>();
-            int attempts = 0;
-            while (picks.size() < numPostcodes && attempts < 50) {
-                picks.add(String.format("%04d", randomNswPostcode(rand)));
-                attempts++;
-            }
-            String suffix = Long.toHexString(System.nanoTime()) + "-" + i;
-            batch.add(new Document()
-                    .append("name", "Synthetic Buyer " + i)
-                    .append("email", "buyer" + i + "-" + suffix + "@example.com")
-                    .append("account_type", BUYER_TYPE)
-                    .append("postcode_interest", new ArrayList<>(picks)));
+        try {
+            c.setAutoCommit(false);
+            try (PreparedStatement insAcc = c.prepareStatement(
+                    "INSERT INTO accounts (id, name, email, account_type) VALUES (?, ?, ?, ?)");
+                 PreparedStatement insPi = c.prepareStatement(
+                         "INSERT OR IGNORE INTO postcode_interest (account_id, post_code) VALUES (?, ?)")) {
 
-            if (batch.size() >= 1000) {
-                coll.insertMany(batch);
-                batch.clear();
+                for (int i = 0; i < count; i++) {
+                    int numPostcodes = rand.nextInt(MAX_POSTCODES + 1);
+                    Set<String> picks = new LinkedHashSet<>();
+                    int attempts = 0;
+                    while (picks.size() < numPostcodes && attempts < 50) {
+                        picks.add(String.format("%04d", randomNswPostcode(rand)));
+                        attempts++;
+                    }
+                    String suffix = Long.toHexString(System.nanoTime()) + "-" + i;
+                    String accId = ObjectIdLike.next();
+                    insAcc.setString(1, accId);
+                    insAcc.setString(2, "Synthetic Buyer " + i);
+                    insAcc.setString(3, "buyer" + i + "-" + suffix + "@example.com");
+                    insAcc.setString(4, BUYER_TYPE);
+                    insAcc.executeUpdate();
+
+                    for (String pc : picks) {
+                        Db.ensurePostcode(c, pc);
+                        insPi.setString(1, accId);
+                        insPi.setString(2, pc);
+                        insPi.executeUpdate();
+                    }
+                }
             }
+            c.commit();
+            return count;
+        } catch (SQLException e) {
+            rollbackQuietly();
+            throw new RuntimeException("seedPurchasers failed", e);
+        } finally {
+            setAutoCommitQuietly(true);
         }
-        if (!batch.isEmpty()) coll.insertMany(batch);
-        return count;
     }
 
     private static int randomNswPostcode(Random rand) {
@@ -189,10 +229,57 @@ public class PurchaserDAO {
         return new ArrayList<>(seen);
     }
 
-    private Purchaser toPurchaser(Document d) {
-        String id = d.getObjectId("_id").toHexString();
-        List<String> postcodes = d.getList("postcode_interest", String.class, Collections.emptyList());
-        return new Purchaser(id, d.getString("name"), d.getString("email"), new ArrayList<>(postcodes));
+    private void insertInterests(String accountId, List<String> postcodes) throws SQLException {
+        if (postcodes.isEmpty()) return;
+        try (PreparedStatement ps = c.prepareStatement(
+                "INSERT OR IGNORE INTO postcode_interest (account_id, post_code) VALUES (?, ?)")) {
+            for (String pc : postcodes) {
+                Db.ensurePostcode(c, pc);
+                ps.setString(1, accountId);
+                ps.setString(2, pc);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    private List<String> fetchPostcodes(String accountId) {
+        List<String> out = new ArrayList<>();
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT post_code FROM postcode_interest WHERE account_id = ?")) {
+            ps.setString(1, accountId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(rs.getString(1));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("fetchPostcodes failed", e);
+        }
+        return out;
+    }
+
+    private boolean buyerExists(String id) {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT 1 FROM accounts WHERE id = ? AND account_type = ?")) {
+            ps.setString(1, id);
+            ps.setString(2, BUYER_TYPE);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("buyerExists failed", e);
+        }
+    }
+
+    private Purchaser loadPurchaser(String id, String name, String email) {
+        List<String> postcodes = fetchPostcodes(id);
+        return new Purchaser(id, name, email, postcodes.isEmpty() ? Collections.emptyList() : postcodes);
+    }
+
+    private void rollbackQuietly() {
+        try { c.rollback(); } catch (SQLException ignored) {}
+    }
+
+    private void setAutoCommitQuietly(boolean v) {
+        try { c.setAutoCommit(v); } catch (SQLException ignored) {}
     }
 
     public enum AddResult {

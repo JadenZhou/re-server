@@ -1,38 +1,42 @@
-# re-server
+# re-server (alternate/db: SQLite)
 
-A lightweight real-estate data platform built for CS4530, with:
+A lightweight real-estate data platform built for CS4530.
 
-- **REServer**: a Java + Javalin API for querying property records
-- **REDataLoader**: a Java CSV ingestion tool for loading NSW property sales into MongoDB
+This branch (`alternate/db`) swaps the persistence layer from MongoDB to
+**SQLite**. The HTTP API and its response shapes are unchanged — only the
+storage engine differs. `main` is still on MongoDB.
+
+- **REServer**: Java + Javalin API for querying property records.
+- **REDataLoader**: Java CSV ingestion tool for loading NSW property sales
+  into the SQLite database.
 
 ---
 
-## ✨ What this project does
+## What this project does
 
-- Loads NSW real-estate sales data from CSV into MongoDB
+- Loads NSW real-estate sales data from CSV into a SQLite file.
 - Exposes HTTP endpoints to fetch properties by:
   - property ID
   - postcode
   - optional price range filters
-- Supports both:
-  - a shared MongoDB Atlas cluster
-  - an optional local MongoDB container for development
+- Single embedded database file. No separate database server to run.
 
 ---
 
-## 🧱 Repository structure
+## Repository structure
 
 ```text
 re-server/
-├── REServer/        # REST API service (Javalin)
-├── REDataLoader/    # CSV -> MongoDB loader
+├── REServer/        # REST API service (Javalin + JDBC/SQLite)
+├── REDataLoader/    # CSV -> SQLite loader
 ├── docker-compose.yml
+├── docs/plans/      # design docs (incl. the SQLite migration design)
 └── .env.example
 ```
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 CSV file (nsw_property_data.csv)
@@ -41,7 +45,7 @@ CSV file (nsw_property_data.csv)
 REDataLoader (one-off batch loader)
         │
         ▼
-MongoDB (Atlas or local container)
+SQLite file (./data/re-server.db)
         │
         ▼
 REServer (HTTP API on :7070)
@@ -49,7 +53,7 @@ REServer (HTTP API on :7070)
 
 ---
 
-## ✅ Prerequisites
+## Prerequisites
 
 Choose one workflow:
 
@@ -57,13 +61,14 @@ Choose one workflow:
 - Docker + Docker Compose
 
 ### Option B: Local Java/Maven
-- Java 21 (recommended, matches Docker images)
+- Java 21
 - Maven 3.9+
-- MongoDB Atlas URI or local MongoDB
+
+No external database server is needed — SQLite is embedded.
 
 ---
 
-## ⚙️ Environment setup
+## Environment setup
 
 From repository root:
 
@@ -71,16 +76,12 @@ From repository root:
 cp .env.example .env
 ```
 
-Set `MONGO_URI` in `.env`.
-
-- Atlas example: `mongodb+srv://<user>:<password>@<cluster>/`
-- Local Docker Mongo example: `mongodb://mongo:27017`
-
-> `.env` is gitignored — do not commit credentials.
+Defaults are already correct for the Docker workflow. Override `SQLITE_PATH`
+and `RE_CSV_PATH` if you want to point elsewhere.
 
 ---
 
-## 🚀 Quick start (Docker)
+## Quick start (Docker)
 
 ### 1) Start API server
 
@@ -88,17 +89,10 @@ Set `MONGO_URI` in `.env`.
 docker compose up --build server
 ```
 
-Server runs on **http://localhost:7070**.
+Server runs on **http://localhost:7070** and creates an empty
+`./data/re-server.db` on first boot if no file is present.
 
-### 2) (Optional) Start local MongoDB
-
-```bash
-docker compose --profile local up -d mongo
-```
-
-Use this with `MONGO_URI=mongodb://mongo:27017` in `.env`.
-
-### 3) Load dataset into MongoDB
+### 2) Load dataset into SQLite
 
 Place your CSV at `./data/nsw_property_data.csv`, then run:
 
@@ -106,18 +100,18 @@ Place your CSV at `./data/nsw_property_data.csv`, then run:
 docker compose run --rm loader
 ```
 
-The loader resets and repopulates `realestate.properties`, then builds indexes.
+The loader drops and recreates the schema, then bulk-loads property rows.
 
 ---
 
-## 💻 Run without Docker
+## Run without Docker
 
 ### API server
 
 ```bash
 cd REServer
 mvn clean package
-MONGO_URI="<your-mongo-uri>" java -jar target/*-jar-with-dependencies.jar
+SQLITE_PATH=./re-server.db java -jar target/*-jar-with-dependencies.jar
 ```
 
 ### Data loader
@@ -125,39 +119,43 @@ MONGO_URI="<your-mongo-uri>" java -jar target/*-jar-with-dependencies.jar
 ```bash
 cd REDataLoader
 mvn clean package
-MONGO_URI="<your-mongo-uri>" RE_CSV_PATH="../data/nsw_property_data.csv" java -jar target/*-jar-with-dependencies.jar
+SQLITE_PATH=../re-server.db RE_CSV_PATH=../data/nsw_property_data.csv \
+  java -jar target/*-jar-with-dependencies.jar
 ```
 
 ---
 
-## 📚 API reference
+## API reference
 
 Base URL: `http://localhost:7070`
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/` | Health message |
-| GET | `/property` | Get properties (supports `minPrice` / `maxPrice`) |
-| GET | `/property/{propertyID}` | Get latest sale row for property ID |
-| GET | `/property/postcode/{postcode}` | Get properties in a postcode |
+| GET  | `/` | Health message |
+| GET  | `/property` | Get properties (supports `minPrice` / `maxPrice`) |
+| GET  | `/property/{propertyID}` | Get property by ID |
+| GET  | `/property/postcode/{postcode}` | Get properties in a postcode |
 | POST | `/property` | Insert a property record |
+| POST | `/listing` | Create a listing |
+| POST | `/listing/seed` | Seed up to 1000 random listings |
+| GET  | `/listing` | List all listings |
+| GET  | `/listing/{listingID}` | Listing detail + price history |
+| POST | `/listing/{listingID}/price` | Add a price update |
+| POST | `/purchaser` | Create a buyer |
+| GET  | `/purchaser` | List buyers |
+| GET  | `/purchaser/{purchaserID}` | Buyer detail |
+| GET  | `/purchaser/postcode/{postcode}` | Buyers interested in a postcode |
+| POST | `/purchaser/{purchaserID}/interest` | Add a watched postcode |
+| DELETE | `/purchaser/{purchaserID}/interest/{postcode}` | Remove a watched postcode |
+| POST | `/purchaser/seed` | Seed synthetic buyers (default 10,000) |
+| GET  | `/notify` | Notification report for buyers with for-sale matches |
 
 ### Examples
 
 ```bash
-# Health
 curl http://localhost:7070/
-
-# All properties (capped)
 curl http://localhost:7070/property
-
-# Price range filter
 curl "http://localhost:7070/property?minPrice=1000000&maxPrice=3000000"
-
-# By property ID
-curl http://localhost:7070/property/123456
-
-# By postcode
 curl http://localhost:7070/property/postcode/2000
 ```
 
@@ -165,16 +163,19 @@ curl http://localhost:7070/property/postcode/2000
 
 ```json
 {
-  "propertyID": "123456",
+  "propertyID": "65f1a2b3c4d5e6f7a8b9c0d1",
   "postcode": "2000",
   "propertyPrice": "1850000",
   "forSale": false
 }
 ```
 
+Property IDs are 24-character hex strings — same wire shape Mongo returned,
+generated by `db.ObjectIdLike` so existing clients don't need changes.
+
 ---
 
-## 🧪 Development checks
+## Development checks
 
 From each module:
 
@@ -183,21 +184,22 @@ cd REServer && mvn test
 cd REDataLoader && mvn test
 ```
 
-(Currently, there are no test classes; Maven validates compilation and project wiring.)
+`NotifyServiceTest` runs without any DB.
 
 ---
 
-## 📝 Notes
+## Notes
 
-- Data lives in database `realestate`, collection `properties`.
-- API responses for list/detail routes are currently HTML table views.
-- Queries are capped to prevent unbounded response sizes.
+- Data lives in a single SQLite file (default `./data/re-server.db`).
+- API responses for list/detail routes are HTML table views.
+- Queries are capped (1000 rows) to prevent unbounded responses.
+- See `docs/plans/2026-05-19-sqlite-migration-design.md` for the schema and
+  migration design.
 
 ---
 
-## 🤝 Team workflow tips
+## Team workflow tips
 
-- Keep credentials only in `.env`
-- Run loader separately from server startup (faster iteration)
-- Use local Mongo profile for offline or throttling-free development
-
+- Run the loader once after pulling the CSV; subsequent server restarts
+  don't re-load data.
+- Use `docker compose down` (no `-v`) to keep your local DB file intact.

@@ -1,182 +1,261 @@
 package listing;
 
-import com.mongodb.client.AggregateIterable;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Aggregates;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Sorts;
-import org.bson.Document;
-import org.bson.types.ObjectId;
+import db.Db;
+import db.ObjectIdLike;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
 public class ListingDAO {
 
-    private static final String DB_NAME = "nsw_property_data";
     private static final int MAX_RESULTS = 1000;
 
-    private final MongoCollection<Document> listingsColl;
-    private final MongoCollection<Document> pricingColl;
-    private final MongoCollection<Document> propertiesColl;
+    private final Connection c;
 
     public ListingDAO() {
-        String uri = System.getenv("MONGO_URI");
-        if (uri == null || uri.isEmpty()) {
-            throw new IllegalStateException("MONGO_URI env var is required");
+        this.c = Db.connection();
+    }
+
+    /** Creates a listing for the given property and seeds its initial price. */
+    public Optional<String> createListing(String propertyId, double price) {
+        if (!ObjectIdLike.isValid(propertyId)) return Optional.empty();
+        if (!propertyExists(propertyId)) return Optional.empty();
+
+        String listingId = ObjectIdLike.next();
+        String now = Instant.now().toString();
+        try {
+            c.setAutoCommit(false);
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO listings (id, property_id, is_discounted, date_added) " +
+                            "VALUES (?, ?, 0, ?)")) {
+                ps.setString(1, listingId);
+                ps.setString(2, propertyId);
+                ps.setString(3, now);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO listing_prices (listing_id, price, updated_at) VALUES (?, ?, ?)")) {
+                ps.setString(1, listingId);
+                ps.setDouble(2, price);
+                ps.setString(3, now);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "UPDATE properties SET for_sale = 1 WHERE id = ?")) {
+                ps.setString(1, propertyId);
+                ps.executeUpdate();
+            }
+            c.commit();
+            return Optional.of(listingId);
+        } catch (SQLException e) {
+            rollbackQuietly();
+            throw new RuntimeException("createListing failed", e);
+        } finally {
+            setAutoCommitQuietly(true);
         }
-        MongoClient client = MongoClients.create(uri);
-        MongoDatabase db = client.getDatabase(DB_NAME);
-        this.listingsColl = db.getCollection("listings");
-        this.pricingColl = db.getCollection("property_pricing_updates");
-        this.propertiesColl = db.getCollection("properties");
     }
 
-    /** Creates a listing for the given property ObjectId at the specified price. */
-    public Optional<String> createListing(String propertyObjId, double price) {
-        if (!ObjectId.isValid(propertyObjId)) return Optional.empty();
-        ObjectId pid = new ObjectId(propertyObjId);
-
-        if (propertiesColl.find(Filters.eq("_id", pid)).first() == null) return Optional.empty();
-
-        Date now = new Date();
-        Document listing = new Document()
-                .append("pid", pid)
-                .append("is_discounted", false)
-                .append("date_added", now);
-        listingsColl.insertOne(listing);
-
-        pricingColl.insertOne(new Document()
-                .append("pid", pid)
-                .append("updated_price", price)
-                .append("date", now));
-
-        return Optional.of(listing.getObjectId("_id").toHexString());
-    }
-
-    /** Randomly samples 1000 properties and creates a listing + initial price at +20% for each. */
+    /**
+     * Randomly samples up to 1000 properties and creates a listing + initial
+     * price (at +20% of purchase_price) for each. Mirrors the Mongo branch's
+     * seed behavior for parity.
+     */
     public int seedListings() {
-        AggregateIterable<Document> sample = propertiesColl.aggregate(
-                Arrays.asList(Aggregates.sample(1000)));
-
-        List<Document> newListings = new ArrayList<>();
-        List<Document> newPrices = new ArrayList<>();
-        List<ObjectId> listedPropIds = new ArrayList<>();
-        Date now = new Date();
-
-        for (Document prop : sample) {
-            ObjectId propId = prop.getObjectId("_id");
-            Long purchasePrice = prop.getLong("purchase_price");
-            if (purchasePrice == null || purchasePrice <= 0) continue;
-
-            double listingPrice = purchasePrice * 1.2;
-
-            newListings.add(new Document()
-                    .append("pid", propId)
-                    .append("is_discounted", false)
-                    .append("date_added", now));
-
-            newPrices.add(new Document()
-                    .append("pid", propId)
-                    .append("updated_price", listingPrice)
-                    .append("date", now));
-
-            listedPropIds.add(propId);
+        List<String> propIds = new ArrayList<>();
+        List<Long> prices = new ArrayList<>();
+        String sampleSql = "SELECT id, purchase_price FROM properties " +
+                "WHERE purchase_price IS NOT NULL AND purchase_price > 0 " +
+                "ORDER BY RANDOM() LIMIT 1000";
+        try (PreparedStatement ps = c.prepareStatement(sampleSql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                propIds.add(rs.getString("id"));
+                prices.add(rs.getLong("purchase_price"));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("seedListings sample failed", e);
         }
+        if (propIds.isEmpty()) return 0;
 
-        if (newListings.isEmpty()) return 0;
-        listingsColl.insertMany(newListings);
-        pricingColl.insertMany(newPrices);
+        String now = Instant.now().toString();
+        try {
+            c.setAutoCommit(false);
+            try (PreparedStatement insListing = c.prepareStatement(
+                    "INSERT INTO listings (id, property_id, is_discounted, date_added) VALUES (?, ?, 0, ?)");
+                 PreparedStatement insPrice = c.prepareStatement(
+                         "INSERT INTO listing_prices (listing_id, price, updated_at) VALUES (?, ?, ?)");
+                 PreparedStatement updProp = c.prepareStatement(
+                         "UPDATE properties SET for_sale = 1 WHERE id = ?")) {
 
-        // Sync `for_sale = true` on the property docs that just got listed so
-        // PropertyDAO reads expose the listing state without a separate join.
-        propertiesColl.updateMany(
-                Filters.in("_id", listedPropIds),
-                new Document("$set", new Document("for_sale", true)));
-        return newListings.size();
+                for (int i = 0; i < propIds.size(); i++) {
+                    String listingId = ObjectIdLike.next();
+                    String propId = propIds.get(i);
+                    double listingPrice = prices.get(i) * 1.2;
+
+                    insListing.setString(1, listingId);
+                    insListing.setString(2, propId);
+                    insListing.setString(3, now);
+                    insListing.addBatch();
+
+                    insPrice.setString(1, listingId);
+                    insPrice.setDouble(2, listingPrice);
+                    insPrice.setString(3, now);
+                    insPrice.addBatch();
+
+                    updProp.setString(1, propId);
+                    updProp.addBatch();
+                }
+                insListing.executeBatch();
+                insPrice.executeBatch();
+                updProp.executeBatch();
+            }
+            c.commit();
+            return propIds.size();
+        } catch (SQLException e) {
+            rollbackQuietly();
+            throw new RuntimeException("seedListings failed", e);
+        } finally {
+            setAutoCommitQuietly(true);
+        }
     }
 
     public List<Listing> getAllListings() {
         List<Listing> out = new ArrayList<>();
-        for (Document d : listingsColl.find().limit(MAX_RESULTS)) {
-            out.add(toListing(d));
+        String sql = "SELECT * FROM listings LIMIT ?";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, MAX_RESULTS);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(toListing(rs));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getAllListings failed", e);
         }
         return out;
     }
 
     public Optional<Listing> getListingById(String id) {
-        if (!ObjectId.isValid(id)) return Optional.empty();
-        Document d = listingsColl.find(Filters.eq("_id", new ObjectId(id))).first();
-        return Optional.ofNullable(d).map(this::toListing);
+        if (!ObjectIdLike.isValid(id)) return Optional.empty();
+        String sql = "SELECT * FROM listings WHERE id = ?";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return Optional.empty();
+                return Optional.of(toListing(rs));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getListingById failed", e);
+        }
     }
 
     /** Returns all price entries for a listing, oldest first. */
     public List<PriceEntry> getPriceHistory(String listingId) {
-        if (!ObjectId.isValid(listingId)) return List.of();
-        Document listing = listingsColl.find(Filters.eq("_id", new ObjectId(listingId))).first();
-        if (listing == null) return List.of();
-
-        ObjectId pid = listing.getObjectId("pid");
+        if (!ObjectIdLike.isValid(listingId)) return List.of();
         List<PriceEntry> out = new ArrayList<>();
-        for (Document d : pricingColl.find(Filters.eq("pid", pid)).sort(Sorts.ascending("date"))) {
-            Double price = d.getDouble("updated_price");
-            Date date = d.getDate("date");
-            if (price != null && date != null) {
-                out.add(new PriceEntry(price, date.toString()));
+        String sql = "SELECT price, updated_at FROM listing_prices " +
+                "WHERE listing_id = ? ORDER BY updated_at ASC";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, listingId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new PriceEntry(rs.getDouble("price"), rs.getString("updated_at")));
+                }
             }
+        } catch (SQLException e) {
+            throw new RuntimeException("getPriceHistory failed", e);
         }
         return out;
     }
 
-    /** Adds a new price update for the property tied to this listing. */
+    /** Adds a new price update. Marks the listing as discounted if the price drops below the latest. */
     public boolean addPriceUpdate(String listingId, double newPrice) {
-        if (!ObjectId.isValid(listingId)) return false;
-        Document listing = listingsColl.find(Filters.eq("_id", new ObjectId(listingId))).first();
-        if (listing == null) return false;
+        if (!ObjectIdLike.isValid(listingId)) return false;
+        if (!listingExists(listingId)) return false;
 
-        ObjectId pid = listing.getObjectId("pid");
-
-        // Mark discounted if the new price is lower than the current latest price
-        double latest = getLatestPrice(pid);
-        if (latest > 0 && newPrice < latest) {
-            listingsColl.updateOne(
-                    Filters.eq("_id", new ObjectId(listingId)),
-                    new Document("$set", new Document("is_discounted", true)));
+        double latest = getLatestPrice(listingId);
+        try {
+            c.setAutoCommit(false);
+            if (latest > 0 && newPrice < latest) {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "UPDATE listings SET is_discounted = 1 WHERE id = ?")) {
+                    ps.setString(1, listingId);
+                    ps.executeUpdate();
+                }
+            }
+            try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO listing_prices (listing_id, price, updated_at) VALUES (?, ?, ?)")) {
+                ps.setString(1, listingId);
+                ps.setDouble(2, newPrice);
+                ps.setString(3, Instant.now().toString());
+                ps.executeUpdate();
+            }
+            c.commit();
+            return true;
+        } catch (SQLException e) {
+            rollbackQuietly();
+            throw new RuntimeException("addPriceUpdate failed", e);
+        } finally {
+            setAutoCommitQuietly(true);
         }
-
-        pricingColl.insertOne(new Document()
-                .append("pid", pid)
-                .append("updated_price", newPrice)
-                .append("date", new Date()));
-        return true;
     }
 
-    private double getLatestPrice(ObjectId pid) {
-        Document d = pricingColl.find(Filters.eq("pid", pid))
-                .sort(Sorts.descending("date"))
-                .first();
-        if (d == null) return 0;
-        Double p = d.getDouble("updated_price");
-        return p == null ? 0 : p;
+    private double getLatestPrice(String listingId) {
+        String sql = "SELECT price FROM listing_prices WHERE listing_id = ? " +
+                "ORDER BY updated_at DESC LIMIT 1";
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, listingId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getDouble(1);
+                return 0;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("getLatestPrice failed", e);
+        }
     }
 
-    private Listing toListing(Document d) {
-        String id = d.getObjectId("_id").toHexString();
-        ObjectId pid = d.getObjectId("pid");
-        boolean discounted = Boolean.TRUE.equals(d.getBoolean("is_discounted"));
-        Date dateAdded = d.getDate("date_added");
-        double latest = pid != null ? getLatestPrice(pid) : 0;
-        return new Listing(
-                id,
-                pid != null ? pid.toHexString() : null,
-                discounted,
-                dateAdded != null ? dateAdded.toString() : null,
-                latest);
+    private boolean propertyExists(String propertyId) {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT 1 FROM properties WHERE id = ?")) {
+            ps.setString(1, propertyId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("propertyExists failed", e);
+        }
+    }
+
+    private boolean listingExists(String listingId) {
+        try (PreparedStatement ps = c.prepareStatement(
+                "SELECT 1 FROM listings WHERE id = ?")) {
+            ps.setString(1, listingId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("listingExists failed", e);
+        }
+    }
+
+    private Listing toListing(ResultSet rs) throws SQLException {
+        String id = rs.getString("id");
+        String propertyId = rs.getString("property_id");
+        boolean discounted = rs.getInt("is_discounted") == 1;
+        String dateAdded = rs.getString("date_added");
+        double latest = getLatestPrice(id);
+        return new Listing(id, propertyId, discounted, dateAdded, latest);
+    }
+
+    private void rollbackQuietly() {
+        try { c.rollback(); } catch (SQLException ignored) {}
+    }
+
+    private void setAutoCommitQuietly(boolean v) {
+        try { c.setAutoCommit(v); } catch (SQLException ignored) {}
     }
 }

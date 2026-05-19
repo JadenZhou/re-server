@@ -9,4 +9,5 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /app/target/*-jar-with-dependencies.jar /app/app.jar
 EXPOSE 7070
+VOLUME /data
 CMD ["java", "-jar", "/app/app.jar"]
