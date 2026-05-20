@@ -3,14 +3,17 @@
 # stop with `services/stop-all.sh`. Logs to /tmp/<svc>.log.
 #
 # Env:
-#   SQLITE_PATH  shared SQLite file (default ../data/re-server.db)
+#   MONGO_URI    required — shared by the 3 data-owning services
 #   *_PORT       override individual service ports
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export SQLITE_PATH="${SQLITE_PATH:-$(pwd)/../data/re-server.db}"
-mkdir -p "$(dirname "$SQLITE_PATH")"
+if [ -z "${MONGO_URI:-}" ]; then
+    echo "error: MONGO_URI is required (e.g. export MONGO_URI=mongodb://localhost:27017)" >&2
+    exit 1
+fi
+export MONGO_URI
 
 start() {
     local name=$1
@@ -21,7 +24,7 @@ start() {
     local port
     eval "port=\${$port_var:-$default_port}"
     echo "starting $name on :$port  (log /tmp/$name.log)"
-    env "$port_var=$port" SQLITE_PATH="$SQLITE_PATH" \
+    env "$port_var=$port" MONGO_URI="$MONGO_URI" \
         java -jar "$jar" > "/tmp/${name}.log" 2>&1 &
     echo "$!" >> pids.txt
 }

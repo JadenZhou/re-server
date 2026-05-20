@@ -5,7 +5,10 @@ import client.ServiceClient.Response;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import notify.Notifier;
+import web.Html;
+import web.Renderers;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,7 +41,11 @@ public class Gateway {
         registerListingRoutes(app, svc);
         registerPurchaserRoutes(app, svc);
         registerStatsRoutes(app, svc);
-        app.get("/notify", ctx -> ctx.json(notifier.buildNotifications()));
+        app.get("/notify", ctx -> {
+            List<Map<String, Object>> notes = notifier.buildNotifications();
+            if (Html.wantsHtml(ctx)) ctx.contentType("text/html").result(Renderers.notify(notes));
+            else ctx.json(notes);
+        });
     }
 
     // ── property: gateway fans out to property-server (record) + analytics (bump)
@@ -46,20 +53,21 @@ public class Gateway {
     private static void registerPropertyRoutes(Javalin app, ServiceClient svc) {
         app.get("/property", ctx -> {
             String qs = buildQueryString(ctx, "minPrice", "maxPrice");
-            relay(ctx, svc.propertyGet("/property" + qs));
+            Response r = svc.propertyGet("/property" + qs);
+            respondHtmlOrJson(ctx, r, body -> Renderers.propertyList("All Properties", body, svc));
         });
         app.post("/property", ctx -> relay(ctx, svc.propertyPost("/property", rawBody(ctx))));
         app.get("/property/{propertyID}", ctx -> {
             String id = ctx.pathParam("propertyID");
             Response r = svc.propertyGet("/property/" + urlEncode(id));
             if (r.ok()) svc.bumpPropertyView(id);   // only bump on hit
-            relay(ctx, r);
+            respondHtmlOrJson(ctx, r, body -> Renderers.propertyDetail(id, body, svc));
         });
         app.get("/property/postcode/{postcode}", ctx -> {
             String pc = ctx.pathParam("postcode");
             Response r = svc.propertyGet("/property/postcode/" + urlEncode(pc));
             if (r.ok() && hasItems(r)) svc.bumpPostcodeSearch(pc);
-            relay(ctx, r);
+            respondHtmlOrJson(ctx, r, body -> Renderers.propertyList("Properties in Postcode " + pc, body, svc));
         });
     }
 
@@ -68,9 +76,15 @@ public class Gateway {
     private static void registerListingRoutes(Javalin app, ServiceClient svc) {
         app.post("/listing", ctx -> relay(ctx, svc.propertyPost("/listing", rawBody(ctx))));
         app.post("/listing/seed", ctx -> relay(ctx, svc.propertyPost("/listing/seed", null)));
-        app.get("/listing", ctx -> relay(ctx, svc.propertyGet("/listing")));
-        app.get("/listing/{listingID}", ctx ->
-                relay(ctx, svc.propertyGet("/listing/" + urlEncode(ctx.pathParam("listingID")) + "?withHistory=true")));
+        app.get("/listing", ctx -> {
+            Response r = svc.propertyGet("/listing");
+            respondHtmlOrJson(ctx, r, body -> Renderers.listingList(body, svc));
+        });
+        app.get("/listing/{listingID}", ctx -> {
+            String id = ctx.pathParam("listingID");
+            Response r = svc.propertyGet("/listing/" + urlEncode(id) + "?withHistory=true");
+            respondHtmlOrJson(ctx, r, body -> Renderers.listingDetail(id, body, svc));
+        });
         app.post("/listing/{listingID}/price", ctx ->
                 relay(ctx, svc.propertyPost("/listing/" + urlEncode(ctx.pathParam("listingID")) + "/price", rawBody(ctx))));
     }
@@ -79,14 +93,20 @@ public class Gateway {
 
     private static void registerPurchaserRoutes(Javalin app, ServiceClient svc) {
         app.post("/purchaser", ctx -> relay(ctx, svc.purchaserPost("/purchaser", rawBody(ctx))));
-        app.get("/purchaser", ctx -> relay(ctx, svc.purchaserGet("/purchaser")));
-        app.get("/purchaser/{purchaserID}", ctx ->
-                relay(ctx, svc.purchaserGet("/purchaser/" + urlEncode(ctx.pathParam("purchaserID")))));
+        app.get("/purchaser", ctx -> {
+            Response r = svc.purchaserGet("/purchaser");
+            respondHtmlOrJson(ctx, r, body -> Renderers.purchaserList("All Purchasers", body, svc));
+        });
+        app.get("/purchaser/{purchaserID}", ctx -> {
+            String id = ctx.pathParam("purchaserID");
+            Response r = svc.purchaserGet("/purchaser/" + urlEncode(id));
+            respondHtmlOrJson(ctx, r, body -> Renderers.purchaserDetail(id, body, svc));
+        });
         app.get("/purchaser/postcode/{postcode}", ctx -> {
             String pc = ctx.pathParam("postcode");
             Response r = svc.purchaserGet("/purchaser/postcode/" + urlEncode(pc));
             if (r.ok() && hasItems(r)) svc.bumpPostcodeSearch(pc);
-            relay(ctx, r);
+            respondHtmlOrJson(ctx, r, body -> Renderers.purchaserList("Purchasers interested in " + pc, body, svc));
         });
         app.post("/purchaser/{purchaserID}/interest", ctx ->
                 relay(ctx, svc.purchaserPost(
@@ -111,6 +131,21 @@ public class Gateway {
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Content-negotiated response: if the caller wants HTML and the downstream
+     * call succeeded, render via the provided renderer; otherwise relay the
+     * JSON (and any non-2xx status) verbatim.
+     */
+    private static void respondHtmlOrJson(Context ctx, Response r, java.util.function.Function<String, String> htmlRenderer) {
+        if (r.ok() && Html.wantsHtml(ctx)) {
+            ctx.contentType("text/html").status(r.status()).result(htmlRenderer.apply(r.body()));
+        } else if (!r.ok() && Html.wantsHtml(ctx)) {
+            ctx.contentType("text/html").status(r.status()).result(Html.errorPage(r.body()));
+        } else {
+            relay(ctx, r);
+        }
+    }
 
     private static void relay(Context ctx, Response r) {
         ctx.status(r.status());

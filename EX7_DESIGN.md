@@ -5,27 +5,27 @@ brief asked for an API gateway plus three context-bounded services. Each
 service builds its own fat jar and runs on its own port; they communicate
 only via HTTP (no shared in-process state).
 
-This branch builds on the `alternate/db` SQLite work. SQLite is naturally
-multi-process-friendly: all three data-owning services point at the same
-file (`SQLITE_PATH`), but each service's `db/Db.java` only knows about its
-own tables — the bounded-context rule enforced at the schema layer.
+Underlying store: **MongoDB**. All three data-owning services point at the
+same Mongo URI but each owns a different set of collections. The
+bounded-context rule is enforced by each service's `db/Db.java` and by what
+each DAO queries — a code grep shows that no service touches another's
+collections.
 
 ## The four services
 
-| Service | Port | Tables it owns | Public to gateway |
+| Service | Port | Collections it owns | Public to gateway |
 |---|---|---|---|
 | **gateway** | 7070 | none — pure orchestration | yes (only one clients hit) |
-| **property-server** | 7071 | `postcodes`, `properties`, `listings`, `listing_prices` | gateway-only |
-| **purchaser-server** | 7072 | `accounts`, `postcode_interest`, `purchases` | gateway-only |
-| **analytics-server** | 7073 | `property_views`, `postcode_searches` | gateway-only |
+| **property-server** | 7071 | `properties`, `listings`, `property_pricing_updates` | gateway-only |
+| **purchaser-server** | 7072 | `accounts` (Buyer docs with `postcode_interest` array) | gateway-only |
+| **analytics-server** | 7073 | `property_views`, `postcode_searches` (NEW, ex7 only) | gateway-only |
 
-The teammate's monolithic schema had `search_count` columns on `properties`
-and `postcodes`. **Strict bounded contexts** required moving those into the
-analytics service: `property_views(property_id PK, count)` and
-`postcode_searches(post_code PK, count)`. Property-server and purchaser-
-server literally cannot see view/search counts now — they would have to ask
-the analytics service over HTTP, and in practice the gateway is the only
-caller that does that.
+The pre-ex7 monolith stored attention counters as fields on existing
+documents (e.g. `properties.view_count`). For **strict bounded contexts**
+those counters moved into the analytics service's own collections —
+property-server and purchaser-server have no fields, no code, no awareness
+of attention counts. The only way to read or write them is via HTTP to
+analytics-server.
 
 ## Where orchestration lives
 
@@ -62,10 +62,25 @@ We picked gateway-orchestrates throughout, with one helper class
 | `GET /stats/postcode/{pc}` | — | — | GET `/searches/postcode/{pc}` |
 | `GET /notify` (orchestrated) | GET `/internal/for-sale` | GET `/purchaser` | — |
 
-The two POSTs to analytics on `/property/{id}` and `/property/postcode/{pc}`
-are fire-and-forget — the gateway returns the property data even if the
-analytics bump fails. This decouples client-visible behavior from the
+The analytics POSTs from the property/postcode endpoints are
+fire-and-forget — the gateway returns the property/purchaser data even if
+the analytics bump fails. This decouples client-visible behavior from the
 analytics service's availability.
+
+## HTML vs JSON (content negotiation)
+
+The pre-ex7 monolith rendered HTML for GET endpoints. The split moved that
+formatting concern out of each service: internal services emit JSON only,
+and the **gateway** renders HTML on top of those JSON responses when the
+caller asks for it.
+
+The gateway picks a representation per request:
+- `Accept: text/html` (browser) → HTML page
+- `?format=html` query param → HTML page (overrides Accept; useful from Postman)
+- Anything else → JSON (Postman, curl, other services)
+
+POST/DELETE responses are JSON regardless (matches the monolith's plain-text
+behavior, just structured).
 
 ## HTTP client
 
@@ -84,23 +99,32 @@ cd services
 mvn -DskipTests package          # builds 4 jars (one per module)
 ```
 
-### Start the stack (4 terminals, or background jobs)
+### Start the stack (uses local Mongo)
 
 ```bash
-# point all services at the same SQLite file
-export SQLITE_PATH=./data/re-server.db
+# A local Mongo daemon at localhost:27017 (brew services start mongodb-community)
+# or an Atlas URI — anything the driver can connect to.
+export MONGO_URI=mongodb://localhost:27017
 
-ANALYTICS_PORT=7073 java -jar services/analytics-server/target/analytics-server-jar-with-dependencies.jar &
-PROPERTY_PORT=7071  java -jar services/property-server/target/property-server-jar-with-dependencies.jar  &
-PURCHASER_PORT=7072 java -jar services/purchaser-server/target/purchaser-server-jar-with-dependencies.jar &
-GATEWAY_PORT=7070   java -jar services/gateway/target/gateway-jar-with-dependencies.jar &
+cd services && ./run-all.sh
+# ... hit the gateway with the existing Postman collection ...
+./stop-all.sh
 ```
 
-### Hit the gateway
+`run-all.sh` spawns all four services in the background with shared
+`MONGO_URI`, then polls each port until it accepts connections.
 
-The existing Postman collection (`re-server.postman_collection.json`) works
-unchanged because the gateway exposes the same paths on the same port the
-monolith did.
+### Loading real data
+
+This branch doesn't ship a Mongo CSV loader (the data-loading utility on
+`alternate/db` writes SQLite). For the demo you can:
+
+- Use the gateway's `POST /property` and `POST /listing/seed` endpoints to
+  create properties and listings by hand.
+- Use `POST /purchaser/seed?count=N` to bulk-create synthetic buyers.
+- Or check out `feat/ex5-access-counters`, run that branch's loader once
+  to populate the shared Mongo, then switch back to this branch — the four
+  services see the existing data unchanged.
 
 ## Demo path the instructor sees
 
@@ -115,13 +139,13 @@ curl -s http://localhost:7073/   # "analytics-server up"
 curl -X POST http://localhost:7070/purchaser \
   -H 'Content-Type: application/json' \
   -d '{"name":"Demo","email":"d@x.com","postcodes":["2770"]}'
-# → {"purchaserId":"6a0c..."}
+# → {"purchaserId":"6a0d..."}
 
 # 3. create a property + listing (one hop each: gateway -> property-server)
 curl -X POST http://localhost:7070/property \
   -H 'Content-Type: application/json' \
   -d '{"postcode":"2770","propertyPrice":"500000","address":"1 Test St"}'
-# → {"propertyID":"6a0c...", ...}
+# → {"propertyID":"6a0d...", ...}
 
 curl -X POST http://localhost:7070/listing \
   -H 'Content-Type: application/json' \
@@ -130,32 +154,31 @@ curl -X POST http://localhost:7070/listing \
 # 4. read property 3x (gateway -> property-server + analytics-server bump)
 for i in 1 2 3; do curl -s http://localhost:7070/property/<id> > /dev/null; done
 curl -s http://localhost:7070/stats/property/<id>
-# → {"count":3, ...}      # analytics-server recorded all 3
+# → {"propertyId":"...","count":3}     # analytics-server recorded all 3
 
 # 5. /notify orchestration (gateway calls property-server + purchaser-server)
 curl -s http://localhost:7070/notify | python3 -m json.tool
 # → one notification per buyer with matching for-sale properties
+
+# 6. HTML page (open in browser)
+open 'http://localhost:7070/notify?format=html'
 ```
 
 ## Bounded-context proof
 
-Each service can demonstrably *only* read its own tables, because the
-service's `db/Db.java` only references those tables and the schemas
-exclude foreign columns:
+Each service can demonstrably *only* read its own collections, because its
+`db/Db.java` just exposes the shared `MongoDatabase` and the DAO files
+spell out which collections they touch:
 
 ```bash
-# property-server's schema:
-grep CREATE services/property-server/src/main/java/db/Db.java
-# → postcodes, properties, listings, listing_prices   (no search_count, no accounts)
+# Each service's DAOs name their collections inline:
+grep -nE 'getCollection|database\(\)\.getCollection' \
+    services/{analytics,property,purchaser}-server/src/main/java/**/*.java
 
-# purchaser-server's schema:
-grep CREATE services/purchaser-server/src/main/java/db/Db.java
-# → accounts, postcode_interest, purchases   (no properties)
-
-# analytics-server's schema:
-grep CREATE services/analytics-server/src/main/java/db/Db.java
-# → property_views, postcode_searches   (and nothing else)
+# analytics-server  -> property_views, postcode_searches
+# property-server   -> properties, listings, property_pricing_updates
+# purchaser-server  -> accounts
 ```
 
-A code review can verify with one grep that no service queries another's
-tables.
+A reviewer can verify the rule with one grep that no service queries
+another's collections.
