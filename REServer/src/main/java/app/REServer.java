@@ -5,12 +5,14 @@ import listing.ListingController;
 import listing.ListingDAO;
 import listing.PricingDAO;
 import notify.NotifyController;
+import notify.NotifyDAO;
 import notify.NotifyService;
-import property.PostcodeStatsDAO;
 import property.PropertyController;
 import property.PropertyDAO;
+import purchase.PurchasesDAO;
 import purchaser.PurchaserController;
 import purchaser.PurchaserDAO;
+import purchase.PurchasesDAO;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,19 +24,16 @@ public class REServer {
 
         public static void main(String[] args) {
 
-            var propertyDAO = new PropertyDAO();
-            var postcodeStatsDAO = new PostcodeStatsDAO();
-            PropertyController propertyHandler = new PropertyController(propertyDAO, postcodeStatsDAO);
+            var properties = new PropertyDAO();
+            PropertyController propertyHandler = new PropertyController(properties);
 
-            var listingDAO = new ListingDAO();
-            var pricingDAO = new PricingDAO();
-            ListingController listingHandler = new ListingController(listingDAO, pricingDAO, propertyDAO);
+            var listings = new ListingDAO();
+            ListingController listingHandler = new ListingController(listings);
 
-            var purchaserDAO = new PurchaserDAO();
-            PurchaserController purchaserHandler = new PurchaserController(purchaserDAO);
+            var purchasers = new PurchaserDAO();
+            PurchaserController purchaserHandler = new PurchaserController(purchasers);
 
-            NotifyController notifyHandler = new NotifyController(
-                    listingDAO, pricingDAO, propertyDAO, purchaserDAO, new NotifyService());
+            NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -84,3 +83,5 @@ public class REServer {
 
         }
 }
+
+
