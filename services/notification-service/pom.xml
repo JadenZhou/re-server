@@ -8,18 +8,17 @@
         <artifactId>re-services</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>analytics-server</artifactId>
+    <artifactId>notification-service</artifactId>
 
     <dependencies>
-        <dependency><groupId>io.javalin</groupId><artifactId>javalin-bundle</artifactId><version>${javalin.version}</version></dependency>
-        <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>${slf4j.version}</version></dependency>
-        <dependency><groupId>org.mongodb</groupId><artifactId>mongodb-driver-sync</artifactId><version>${mongo.version}</version></dependency>
         <dependency><groupId>com.rabbitmq</groupId><artifactId>amqp-client</artifactId><version>${amqp.version}</version></dependency>
+        <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId><version>${jackson.version}</version></dependency>
+        <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-simple</artifactId><version>${slf4j.version}</version></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><version>${junit.version}</version><scope>test</scope></dependency>
     </dependencies>
 
     <build>
-        <finalName>analytics-server</finalName>
+        <finalName>notification-service</finalName>
         <plugins>
             <plugin>
                 <artifactId>maven-assembly-plugin</artifactId>
@@ -28,7 +27,7 @@
                         <phase>package</phase>
                         <goals><goal>single</goal></goals>
                         <configuration>
-                            <archive><manifest><mainClass>app.AnalyticsServer</mainClass></manifest></archive>
+                            <archive><manifest><mainClass>app.NotificationService</mainClass></manifest></archive>
                             <descriptorRefs><descriptorRef>jar-with-dependencies</descriptorRef></descriptorRefs>
                         </configuration>
                     </execution>

@@ -31,10 +31,22 @@ start() {
 
 : > pids.txt
 
+# background event services don't bind a TCP port — they only consume AMQP.
+start_bg() {
+    local name=$1
+    local jar=$2
+    echo "starting $name (log /tmp/$name.log)"
+    env MONGO_URI="$MONGO_URI" AMQP_URI="${AMQP_URI:-amqp://guest:guest@localhost:5672}" \
+        java -jar "$jar" > "/tmp/${name}.log" 2>&1 &
+    echo "$!" >> pids.txt
+}
+
 start analytics ANALYTICS_PORT 7073 analytics-server/target/analytics-server-jar-with-dependencies.jar
 start property  PROPERTY_PORT  7071 property-server/target/property-server-jar-with-dependencies.jar
 start purchaser PURCHASER_PORT 7072 purchaser-server/target/purchaser-server-jar-with-dependencies.jar
 start gateway   GATEWAY_PORT   7070 gateway/target/gateway-jar-with-dependencies.jar
+start_bg notification-service notification-service/target/notification-service-jar-with-dependencies.jar
+start_bg notification-consumer notification-consumer/target/notification-consumer-jar-with-dependencies.jar
 
 echo
 echo "waiting for ports to accept connections..."
@@ -47,4 +59,5 @@ for p in 7070 7071 7072 7073; do
         sleep 0.5
     done
 done
-echo "all four services up. gateway = http://localhost:7070"
+echo "all six services up. gateway = http://localhost:7070"
+echo "watch events with:  tail -f /tmp/notification-consumer.log"

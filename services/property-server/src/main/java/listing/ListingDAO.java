@@ -6,6 +6,7 @@ import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import db.Db;
+import events.EventPublisher;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
@@ -28,6 +29,7 @@ public class ListingDAO {
     private final MongoCollection<Document> listings = Db.database().getCollection("listings");
     private final MongoCollection<Document> pricing = Db.database().getCollection("property_pricing_updates");
     private final MongoCollection<Document> properties = Db.database().getCollection("properties");
+    private final EventPublisher events = EventPublisher.get();
 
     public Optional<String> createListing(String propertyIdHex, double price) {
         if (!ObjectId.isValid(propertyIdHex)) return Optional.empty();
@@ -48,7 +50,10 @@ public class ListingDAO {
 
         properties.updateOne(Filters.eq("_id", pid),
                 new Document("$set", new Document("for_sale", true)));
-        return Optional.of(listing.getObjectId("_id").toHexString());
+
+        String listingId = listing.getObjectId("_id").toHexString();
+        emitListed(pid, listingId, price);
+        return Optional.of(listingId);
     }
 
     /** Sample 1000 properties + create listings + initial price at +20%. */
@@ -58,12 +63,14 @@ public class ListingDAO {
         List<Document> newListings = new ArrayList<>();
         List<Document> newPrices = new ArrayList<>();
         List<ObjectId> pids = new ArrayList<>();
+        List<Double> seedPrices = new ArrayList<>();
         Date now = new Date();
 
         for (Document prop : sample) {
             ObjectId pid = prop.getObjectId("_id");
             Long purchasePrice = prop.getLong("purchase_price");
             if (purchasePrice == null || purchasePrice <= 0) continue;
+            double listingPrice = purchasePrice * 1.2;
 
             newListings.add(new Document()
                     .append("pid", pid)
@@ -71,15 +78,20 @@ public class ListingDAO {
                     .append("date_added", now));
             newPrices.add(new Document()
                     .append("pid", pid)
-                    .append("updated_price", purchasePrice * 1.2)
+                    .append("updated_price", listingPrice)
                     .append("date", now));
             pids.add(pid);
+            seedPrices.add(listingPrice);
         }
         if (newListings.isEmpty()) return 0;
         listings.insertMany(newListings);
         pricing.insertMany(newPrices);
         properties.updateMany(Filters.in("_id", pids),
                 new Document("$set", new Document("for_sale", true)));
+        // Emit one property.listed event per seeded listing so notification-service can fan out.
+        for (int i = 0; i < newListings.size(); i++) {
+            emitListed(pids.get(i), newListings.get(i).getObjectId("_id").toHexString(), seedPrices.get(i));
+        }
         return newListings.size();
     }
 
@@ -124,7 +136,31 @@ public class ListingDAO {
                 .append("pid", pid)
                 .append("updated_price", newPrice)
                 .append("date", new Date()));
+        emitPriceChanged(pid, listingId, latest, newPrice);
         return true;
+    }
+
+    // ── event emission ────────────────────────────────────────────────────────
+
+    /** Emits property.listed with the postcode looked up from the property doc. */
+    private void emitListed(ObjectId pid, String listingId, double price) {
+        Document p = properties.find(Filters.eq("_id", pid)).first();
+        if (p == null) return;
+        String postcode = p.getString("post_code");
+        String json = String.format(
+                "{\"type\":\"listed\",\"property_id\":\"%s\",\"listing_id\":\"%s\",\"postcode\":\"%s\",\"price\":%.2f,\"ts\":%d}",
+                pid.toHexString(), listingId, postcode == null ? "" : postcode, price, System.currentTimeMillis());
+        events.publish("property.listed", json);
+    }
+
+    private void emitPriceChanged(ObjectId pid, String listingId, double oldPrice, double newPrice) {
+        Document p = properties.find(Filters.eq("_id", pid)).first();
+        if (p == null) return;
+        String postcode = p.getString("post_code");
+        String json = String.format(
+                "{\"type\":\"price-changed\",\"property_id\":\"%s\",\"listing_id\":\"%s\",\"postcode\":\"%s\",\"old_price\":%.2f,\"new_price\":%.2f,\"ts\":%d}",
+                pid.toHexString(), listingId, postcode == null ? "" : postcode, oldPrice, newPrice, System.currentTimeMillis());
+        events.publish("property.price-changed", json);
     }
 
     private double getLatestPrice(ObjectId pid) {

@@ -6,6 +6,7 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Updates;
 import db.Db;
+import events.EventPublisher;
 import org.bson.Document;
 
 /**
@@ -21,9 +22,19 @@ public class AnalyticsDAO {
 
     private final MongoCollection<Document> views = Db.database().getCollection(VIEWS);
     private final MongoCollection<Document> searches = Db.database().getCollection(SEARCHES);
+    private final EventPublisher events = EventPublisher.get();
 
     public long incrementPropertyView(String propertyId) {
-        return bump(views, "property_id", propertyId);
+        long newCount = bump(views, "property_id", propertyId);
+        // Every increment fires a property.hot event — notification-service
+        // is the one that decides what 'hot' means for whom.
+        if (newCount > 0) {
+            String json = String.format(
+                    "{\"type\":\"hot\",\"property_id\":\"%s\",\"view_count\":%d,\"ts\":%d}",
+                    propertyId, newCount, System.currentTimeMillis());
+            events.publish("property.hot", json);
+        }
+        return newCount;
     }
 
     public long getPropertyViews(String propertyId) {

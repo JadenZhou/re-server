@@ -14,6 +14,8 @@
         <module>property-server</module>
         <module>purchaser-server</module>
         <module>gateway</module>
+        <module>notification-service</module>
+        <module>notification-consumer</module>
     </modules>
 
     <properties>
@@ -24,6 +26,7 @@
         <slf4j.version>2.0.16</slf4j.version>
         <jackson.version>2.18.1</jackson.version>
         <junit.version>5.10.2</junit.version>
+        <amqp.version>5.22.0</amqp.version>
     </properties>
 
     <build>
