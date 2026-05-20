@@ -66,6 +66,12 @@ public class FavoritedPropertiesDAO {
     return results;
   }
 
+  public List<Document> findAllFavoritedProperties() {
+    List<Document> results = new ArrayList<>();
+    collection.find().into(results);
+    return results;
+  }
+
   public void close() {
     client.close();
   }
