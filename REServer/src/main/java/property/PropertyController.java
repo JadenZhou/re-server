@@ -8,20 +8,16 @@ import java.util.Optional;
 public class PropertyController {
 
     private final PropertyDAO properties;
+    private final PostcodeStatsDAO postcodeStats;
 
-    public PropertyController(PropertyDAO properties) {
+    public PropertyController(PropertyDAO properties, PostcodeStatsDAO postcodeStats) {
         this.properties = properties;
+        this.postcodeStats = postcodeStats;
     }
 
     // implements POST /property
     public void createProperty(Context ctx) {
-
-        // Extract Property from request body
-        // TO DO override Validator exception method to report better error message
-        Property property = ctx.bodyValidator(Property.class)
-                                .get();
-
-        // store new property in data set
+        Property property = ctx.bodyValidator(Property.class).get();
         if (properties.newProperty(property)) {
             ctx.result("Property Created");
             ctx.status(201);
@@ -51,6 +47,7 @@ public class PropertyController {
             ctx.html(errorHtml("No Properties Found"));
             ctx.status(404);
         } else {
+            allProperties.forEach(p -> postcodeStats.incrementSearchCount(p.postcode));
             ctx.html(propertyListHtml("All Properties", allProperties));
             ctx.status(200);
         }
@@ -60,6 +57,7 @@ public class PropertyController {
     public void getPropertyByID(Context ctx, String id) {
         Optional<Property> property = properties.getPropertyById(id);
         if (property.isPresent()) {
+            postcodeStats.incrementSearchCount(property.get().postcode);
             ctx.html(propertyListHtml("Property " + id, List.of(property.get())));
             ctx.status(200);
         } else {
@@ -75,6 +73,7 @@ public class PropertyController {
             ctx.html(errorHtml("No properties for postcode found"));
             ctx.status(404);
         } else {
+            result.forEach(p -> postcodeStats.incrementSearchCount(p.postcode));
             ctx.html(propertyListHtml("Properties in Postcode " + postCode, result));
             ctx.status(200);
         }

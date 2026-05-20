@@ -3,9 +3,10 @@ import io.javalin.Javalin;
 import io.javalin.config.JavalinConfig;
 import listing.ListingController;
 import listing.ListingDAO;
+import listing.PricingDAO;
 import notify.NotifyController;
-import notify.NotifyDAO;
 import notify.NotifyService;
+import property.PostcodeStatsDAO;
 import property.PropertyController;
 import property.PropertyDAO;
 import purchaser.PurchaserController;
@@ -21,16 +22,19 @@ public class REServer {
 
         public static void main(String[] args) {
 
-            var properties = new PropertyDAO();
-            PropertyController propertyHandler = new PropertyController(properties);
+            var propertyDAO = new PropertyDAO();
+            var postcodeStatsDAO = new PostcodeStatsDAO();
+            PropertyController propertyHandler = new PropertyController(propertyDAO, postcodeStatsDAO);
 
-            var listings = new ListingDAO();
-            ListingController listingHandler = new ListingController(listings);
+            var listingDAO = new ListingDAO();
+            var pricingDAO = new PricingDAO();
+            ListingController listingHandler = new ListingController(listingDAO, pricingDAO, propertyDAO);
 
-            var purchasers = new PurchaserDAO();
-            PurchaserController purchaserHandler = new PurchaserController(purchasers);
+            var purchaserDAO = new PurchaserDAO();
+            PurchaserController purchaserHandler = new PurchaserController(purchaserDAO);
 
-            NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
+            NotifyController notifyHandler = new NotifyController(
+                    listingDAO, pricingDAO, propertyDAO, purchaserDAO, new NotifyService());
 
             // start Javalin on port 7070
             var app = Javalin.create()
@@ -80,5 +84,3 @@ public class REServer {
 
         }
 }
-
-

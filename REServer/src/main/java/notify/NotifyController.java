@@ -1,9 +1,20 @@
 package notify;
 
 import io.javalin.http.Context;
+import listing.ListingDAO;
+import listing.PricingDAO;
+import org.bson.Document;
+import org.bson.types.ObjectId;
+import property.PropertyDAO;
+import purchaser.Purchaser;
+import purchaser.PurchaserDAO;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * GET /notify
@@ -12,17 +23,25 @@ import java.util.Map;
  */
 public class NotifyController {
 
-    private final NotifyDAO dao;
+    private final ListingDAO listingDAO;
+    private final PricingDAO pricingDAO;
+    private final PropertyDAO propertyDAO;
+    private final PurchaserDAO purchaserDAO;
     private final NotifyService service;
 
-    public NotifyController(NotifyDAO dao, NotifyService service) {
-        this.dao = dao;
+    public NotifyController(ListingDAO listingDAO, PricingDAO pricingDAO,
+                            PropertyDAO propertyDAO, PurchaserDAO purchaserDAO,
+                            NotifyService service) {
+        this.listingDAO = listingDAO;
+        this.pricingDAO = pricingDAO;
+        this.propertyDAO = propertyDAO;
+        this.purchaserDAO = purchaserDAO;
         this.service = service;
     }
 
     public void notify(Context ctx) {
-        Map<String, List<PropertyForSale>> index = dao.buildPostcodeIndex();
-        List<PurchaserSummary> purchasers = dao.fetchPurchasers();
+        Map<String, List<PropertyForSale>> index = buildPostcodeIndex();
+        List<PurchaserSummary> purchasers = fetchPurchasers();
         List<Notification> notifications = service.notify(index, purchasers);
 
         String format = ctx.queryParam("format");
@@ -32,6 +51,38 @@ public class NotifyController {
         } else {
             ctx.html(renderHtml(notifications));
         }
+    }
+
+    private Map<String, List<PropertyForSale>> buildPostcodeIndex() {
+        List<Document> listings = listingDAO.findAll();
+        List<ObjectId> pids = listings.stream()
+                .map(d -> d.getObjectId("pid"))
+                .filter(p -> p != null)
+                .distinct()
+                .collect(Collectors.toList());
+        if (pids.isEmpty()) return Collections.emptyMap();
+
+        Map<ObjectId, Double> prices = pricingDAO.getLatestPrices(pids);
+
+        Map<String, List<PropertyForSale>> index = new HashMap<>();
+        for (Document p : propertyDAO.findByIds(pids)) {
+            ObjectId pid = p.getObjectId("_id");
+            String postcode = p.getString("post_code");
+            Long propertyId = p.getLong("property_id");
+            Double price = prices.get(pid);
+            if (postcode == null || propertyId == null || price == null) continue;
+            index.computeIfAbsent(postcode, k -> new ArrayList<>())
+                    .add(new PropertyForSale(propertyId, price, postcode));
+        }
+        return index;
+    }
+
+    private List<PurchaserSummary> fetchPurchasers() {
+        List<PurchaserSummary> out = new ArrayList<>();
+        for (Purchaser p : purchaserDAO.getAllPurchasers()) {
+            out.add(new PurchaserSummary(p.purchaserId, p.name, p.email, p.postcodes));
+        }
+        return out;
     }
 
     static String renderText(List<Notification> notifications) {

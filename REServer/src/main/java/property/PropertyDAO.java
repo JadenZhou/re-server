@@ -5,6 +5,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 
 import org.bson.Document;
@@ -12,6 +13,8 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,24 +22,38 @@ public class PropertyDAO {
 
   private static final String DB_NAME = "nsw_property_data";
   private static final String COLLECTION_NAME = "properties";
-  // Cap unbounded queries so a single request can't try to ship millions of rows.
   private static final int MAX_RESULTS = 1000;
 
   private final MongoCollection<Document> coll;
-  private final MongoCollection<Document> postcodeStatsColl;
 
   public PropertyDAO() {
     String uri = System.getenv("MONGO_URI");
-    if (uri == null || uri.isEmpty()) {
-      throw new IllegalStateException("MONGO_URI env var is required");
-    }
+    if (uri == null || uri.isEmpty()) throw new IllegalStateException("MONGO_URI env var is required");
     MongoClient client = MongoClients.create(uri);
     MongoDatabase db = client.getDatabase(DB_NAME);
     this.coll = db.getCollection(COLLECTION_NAME);
-    this.postcodeStatsColl = db.getCollection("postcode_stats");
-
   }
 
+  public boolean existsById(ObjectId id) {
+    return coll.find(Filters.eq("_id", id)).first() != null;
+  }
+
+  public List<Document> sampleProperties(int n) {
+    List<Document> out = new ArrayList<>();
+    for (Document d : coll.aggregate(Arrays.asList(Aggregates.sample(n)))) out.add(d);
+    return out;
+  }
+
+  public void markForSale(List<ObjectId> pids) {
+    if (pids.isEmpty()) return;
+    coll.updateMany(Filters.in("_id", pids), new Document("$set", new Document("for_sale", true)));
+  }
+
+  public List<Document> findByIds(Collection<ObjectId> ids) {
+    List<Document> out = new ArrayList<>();
+    for (Document d : coll.find(Filters.in("_id", ids))) out.add(d);
+    return out;
+  }
 
   public boolean newProperty(Property property) {
     Document d = fromPropertyToDocument(property);
@@ -49,15 +66,11 @@ public class PropertyDAO {
   // stored as an ISO-8601 String (YYYY-MM-DD), which sorts correctly under
   // lexicographic ordering — equivalent to chronological order for that format.
 
-
   public Optional<Property> getPropertyById(String propertyID) {
     if (propertyID == null || propertyID.isEmpty()) return Optional.empty();
     Document d = coll.find(Filters.eq("_id", new ObjectId(propertyID))).first();
     Optional<Property> property = Optional.ofNullable(d).map(PropertyDAO::toProperty);
-    if (property.isEmpty()) {
-      return Optional.empty();
-    }
-    auditProperty(property.get());
+    property.ifPresent(this::auditProperty);
     return property;
   }
 
@@ -69,7 +82,7 @@ public class PropertyDAO {
 
   public List<Property> getAllProperties() {
     List<Property> properties = collect(coll.find().limit(MAX_RESULTS));
-    properties.forEach(this::auditProperty); // says get all, but only gets 1000
+    properties.forEach(this::auditProperty);
     return properties;
   }
 
@@ -123,11 +136,7 @@ public class PropertyDAO {
     Boolean forSale = d.getBoolean("for_sale");
     p.forSale = forSale != null && forSale;
     Long searchCount = d.getLong("search_count");
-    if (searchCount != null) {
-      p.searchCount = searchCount;
-    } else {
-      p.searchCount = 0;
-    }
+    p.searchCount = searchCount != null ? searchCount : 0;
     return p;
   }
 
@@ -140,23 +149,8 @@ public class PropertyDAO {
     }
   }
 
-  private void auditProperty(String pid) {
-    try {
-      Optional<Property> property = getPropertyById(pid);
-      assert property.isPresent();
-      auditProperty(property.get());
-    } catch (Exception e) {
-      throw new RuntimeException(String.format("Could not find property %s", pid));
-    }
-  }
-
   private void auditProperty(Property property) {
-    // access collection 'properties' and update the stats object -> ++searchCount
-    Bson update = new Document("$inc", new Document("search_count", 1L));
-    coll.updateOne(Filters.eq("_id", property.propertyID), update);
-
-    // access collection 'postcode_stats' and update the correlated postcode
-    Bson updatePostcode = new Document("$inc", new Document("search_count", 1L));
-    postcodeStatsColl.updateOne(Filters.eq("postcode", property.postcode), updatePostcode);
+    coll.updateOne(Filters.eq("_id", property.propertyID),
+            new Document("$inc", new Document("search_count", 1L)));
   }
 }
