@@ -1,16 +1,27 @@
 package listing;
 
 import io.javalin.http.Context;
+import org.bson.Document;
+import org.bson.types.ObjectId;
+import property.PropertyDAO;
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class ListingController {
 
-    private final ListingDAO dao;
+    private final ListingDAO listingDAO;
+    private final PricingDAO pricingDAO;
+    private final PropertyDAO propertyDAO;
 
-    public ListingController(ListingDAO dao) {
-        this.dao = dao;
+    public ListingController(ListingDAO listingDAO, PricingDAO pricingDAO, PropertyDAO propertyDAO) {
+        this.listingDAO = listingDAO;
+        this.pricingDAO = pricingDAO;
+        this.propertyDAO = propertyDAO;
     }
 
     public void createListing(Context ctx) {
@@ -19,53 +30,117 @@ public class ListingController {
                 .check(r -> r.price > 0, "price must be positive")
                 .get();
 
-        dao.createListing(req.propertyObjId, req.price)
-                .ifPresentOrElse(
-                        id -> { ctx.result("Listing created: " + id); ctx.status(201); },
-                        () -> { ctx.result("Property not found"); ctx.status(404); });
+        if (!ObjectId.isValid(req.propertyObjId)) {
+            ctx.result("Property not found"); ctx.status(404); return;
+        }
+        ObjectId pid = new ObjectId(req.propertyObjId);
+        if (!propertyDAO.existsById(pid)) {
+            ctx.result("Property not found"); ctx.status(404); return;
+        }
+
+        Date now = new Date();
+        ObjectId listingId = listingDAO.insertListing(pid, now);
+        pricingDAO.insertPrice(pid, req.price, now);
+        ctx.result("Listing created: " + listingId.toHexString());
+        ctx.status(201);
     }
 
     public void seedListings(Context ctx) {
-        int count = dao.seedListings();
-        ctx.result("Seeded " + count + " listings");
+        List<Document> sampleProps = propertyDAO.sampleProperties(1000);
+        List<Document> newListings = new ArrayList<>();
+        List<Document> newPrices = new ArrayList<>();
+        List<ObjectId> listedPids = new ArrayList<>();
+        Date now = new Date();
+
+        for (Document prop : sampleProps) {
+            ObjectId propId = prop.getObjectId("_id");
+            Long purchasePrice = prop.getLong("purchase_price");
+            if (purchasePrice == null || purchasePrice <= 0) continue;
+
+            newListings.add(new Document()
+                    .append("pid", propId)
+                    .append("is_discounted", false)
+                    .append("date_added", now));
+            newPrices.add(new Document()
+                    .append("pid", propId)
+                    .append("updated_price", purchasePrice * 1.2)
+                    .append("date", now));
+            listedPids.add(propId);
+        }
+
+        listingDAO.insertMany(newListings);
+        pricingDAO.insertMany(newPrices);
+        propertyDAO.markForSale(listedPids);
+        ctx.result("Seeded " + newListings.size() + " listings");
         ctx.status(201);
     }
 
     public void getAllListings(Context ctx) {
-        List<Listing> listings = dao.getAllListings();
-        if (listings.isEmpty()) {
-            ctx.html(errorHtml("No listings found"));
-            ctx.status(404);
-        } else {
-            ctx.html(listingTableHtml("All Listings", listings));
-            ctx.status(200);
+        List<Document> docs = listingDAO.findAll();
+        if (docs.isEmpty()) {
+            ctx.html(errorHtml("No listings found")); ctx.status(404); return;
         }
+        List<ObjectId> pids = docs.stream()
+                .map(d -> d.getObjectId("pid"))
+                .filter(p -> p != null)
+                .collect(Collectors.toList());
+        Map<ObjectId, Double> prices = pricingDAO.getLatestPrices(pids);
+        List<Listing> listings = docs.stream().map(d -> toListing(d, prices)).collect(Collectors.toList());
+        ctx.html(listingTableHtml("All Listings", listings));
+        ctx.status(200);
     }
 
     public void getListingById(Context ctx, String id) {
-        Optional<Listing> listing = dao.getListingById(id);
-        if (listing.isEmpty()) {
-            ctx.html(errorHtml("Listing not found"));
-            ctx.status(404);
-            return;
+        Optional<Document> doc = listingDAO.findById(id);
+        if (doc.isEmpty()) {
+            ctx.html(errorHtml("Listing not found")); ctx.status(404); return;
         }
-        List<PriceEntry> history = dao.getPriceHistory(id);
-        ctx.html(listingDetailHtml(listing.get(), history));
+        Document d = doc.get();
+        ObjectId pid = d.getObjectId("pid");
+        double latestPrice = pid != null ? pricingDAO.getLatestPrice(pid) : 0;
+        List<PriceEntry> history = pid != null ? pricingDAO.getPriceHistory(pid) : List.of();
+        ctx.html(listingDetailHtml(toListing(d, latestPrice), history));
         ctx.status(200);
     }
 
     public void addPriceUpdate(Context ctx, String listingId) {
-        Double price = ctx.bodyValidator(PriceUpdateRequest.class)
+        double price = ctx.bodyValidator(PriceUpdateRequest.class)
                 .check(r -> r.price > 0, "price must be positive")
                 .get().price;
 
-        if (dao.addPriceUpdate(listingId, price)) {
-            ctx.result("Price updated");
-            ctx.status(201);
-        } else {
-            ctx.result("Listing not found");
-            ctx.status(404);
+        Optional<Document> doc = listingDAO.findById(listingId);
+        if (doc.isEmpty()) {
+            ctx.result("Listing not found"); ctx.status(404); return;
         }
+        ObjectId listingOid = doc.get().getObjectId("_id");
+        ObjectId pid = doc.get().getObjectId("pid");
+
+        double current = pid != null ? pricingDAO.getLatestPrice(pid) : 0;
+        if (current > 0 && price < current) {
+            listingDAO.setDiscounted(listingOid, true);
+        }
+        pricingDAO.insertPrice(pid, price, new Date());
+        ctx.result("Price updated");
+        ctx.status(201);
+    }
+
+    private static Listing toListing(Document d, Map<ObjectId, Double> prices) {
+        ObjectId pid = d.getObjectId("pid");
+        double price = pid != null ? prices.getOrDefault(pid, 0.0) : 0.0;
+        return toListing(d, price);
+    }
+
+    private static Listing toListing(Document d, double latestPrice) {
+        String id = d.getObjectId("_id").toHexString();
+        ObjectId pid = d.getObjectId("pid");
+        boolean discounted = Boolean.TRUE.equals(d.getBoolean("is_discounted"));
+        Date dateAdded = d.getDate("date_added");
+        return new Listing(
+                id,
+                pid != null ? pid.toHexString() : null,
+                discounted,
+                dateAdded != null ? dateAdded.toString() : null,
+                latestPrice);
     }
 
     // ── HTML helpers ──────────────────────────────────────────────────────────
