@@ -10,7 +10,7 @@ import org.bson.types.ObjectId;
  * type, and most-recent contract date without going back to Mongo.
  */
 public class Property {
-    public ObjectId propertyID;
+    public ObjectId _id;
     public String postcode;
     public String propertyPrice;
     public boolean forSale;
@@ -22,8 +22,8 @@ public class Property {
 
     public Property() {}
 
-    public Property(ObjectId propertyID, String postcode, String propertyPrice) {
-        this.propertyID = propertyID;
+    public Property(ObjectId _id, String postcode, String propertyPrice) {
+        this._id = _id;
         this.postcode = postcode;
         this.propertyPrice = propertyPrice;
         this.forSale = false;
