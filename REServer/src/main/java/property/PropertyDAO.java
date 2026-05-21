@@ -23,7 +23,6 @@ public class PropertyDAO {
   private static final int MAX_RESULTS = 1000;
 
   private final MongoCollection<Document> coll;
-  private final MongoCollection<Document> postcodeStatsColl;
 
   public PropertyDAO() {
     String uri = System.getenv("MONGO_URI");
@@ -33,8 +32,6 @@ public class PropertyDAO {
     MongoClient client = MongoClients.create(uri);
     MongoDatabase db = client.getDatabase(DB_NAME);
     this.coll = db.getCollection(COLLECTION_NAME);
-    this.postcodeStatsColl = db.getCollection("postcode_stats");
-
   }
 
 
@@ -93,7 +90,7 @@ public class PropertyDAO {
 
   private static Document fromPropertyToDocument(Property property) {
     return new Document()
-            .append("_id", property.propertyID)
+            .append("_id", property._id)
             .append("post_code", property.postcode)
             .append("purchase_price", parseLongOrNull(property.propertyPrice))
             .append("address", property.address)
@@ -140,23 +137,12 @@ public class PropertyDAO {
     }
   }
 
-  private void auditProperty(String pid) {
-    try {
-      Optional<Property> property = getPropertyById(pid);
-      assert property.isPresent();
-      auditProperty(property.get());
-    } catch (Exception e) {
-      throw new RuntimeException(String.format("Could not find property %s", pid));
-    }
+  private void auditProperty(ObjectId pid) {
+    Bson update = new Document("$inc", new Document("search_count", 1L));
+    coll.updateOne(Filters.eq("_id", pid), update);
   }
 
-  private void auditProperty(Property property) {
-    // access collection 'properties' and update the stats object -> ++searchCount
-    Bson update = new Document("$inc", new Document("search_count", 1L));
-    coll.updateOne(Filters.eq("_id", property.propertyID), update);
-
-    // access collection 'postcode_stats' and update the correlated postcode
-    Bson updatePostcode = new Document("$inc", new Document("search_count", 1L));
-    postcodeStatsColl.updateOne(Filters.eq("postcode", property.postcode), updatePostcode);
+  public void auditProperty(Property property) {
+    this.auditProperty(property._id);
   }
 }
