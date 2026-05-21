@@ -1,5 +1,7 @@
 package notify;
 
+import org.bson.types.ObjectId;
+
 import java.util.List;
 
 /**
@@ -8,12 +10,12 @@ import java.util.List;
  * touching Mongo or any DAO classes.
  */
 public class PurchaserSummary {
-    public final String id;
+    public final ObjectId id;
     public final String name;
     public final String email;
     public final List<String> postcodes;
 
-    public PurchaserSummary(String id, String name, String email, List<String> postcodes) {
+    public PurchaserSummary(ObjectId id, String name, String email, List<String> postcodes) {
         this.id = id;
         this.name = name;
         this.email = email;

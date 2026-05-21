@@ -5,6 +5,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 
 import org.bson.Document;
@@ -12,6 +13,8 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,6 +37,26 @@ public class PropertyDAO {
     this.coll = db.getCollection(COLLECTION_NAME);
   }
 
+  public boolean existsById(ObjectId id) {
+    return coll.find(Filters.eq("_id", id)).first() != null;
+  }
+
+  public List<Document> sampleProperties(int n) {
+    List<Document> out = new ArrayList<>();
+    for (Document d : coll.aggregate(Arrays.asList(Aggregates.sample(n)))) out.add(d);
+    return out;
+  }
+
+  public void markForSale(List<ObjectId> pids) {
+    if (pids.isEmpty()) return;
+    coll.updateMany(Filters.in("_id", pids), new Document("$set", new Document("for_sale", true)));
+  }
+
+  public List<Document> findByIds(Collection<ObjectId> ids) {
+    List<Document> out = new ArrayList<>();
+    for (Document d : coll.find(Filters.in("_id", ids))) out.add(d);
+    return out;
+  }
 
   public boolean newProperty(Property property) {
     Document d = fromPropertyToDocument(property);

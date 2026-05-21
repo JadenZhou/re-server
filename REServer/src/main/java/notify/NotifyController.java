@@ -123,7 +123,7 @@ public class NotifyController {
             sb.append("<h2>").append(escape(n.purchaserName)).append("</h2>");
             sb.append("<p class=\"meta\">")
               .append(escape(n.purchaserEmail))
-              .append(" · id ").append(escape(n.purchaserId))
+              .append(" · id ").append(escape(n.purchaserId.toString()))
               .append(" · watching ").append(escape(String.join(", ", n.watchedPostcodes)))
               .append("</p>");
             sb.append("<table><tr><th>Property ID</th><th>Postcode</th><th>Price</th></tr>");

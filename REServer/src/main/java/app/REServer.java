@@ -6,7 +6,6 @@ import listing.ListingController;
 import listing.ListingDAO;
 import listing.PricingDAO;
 import notify.NotifyController;
-import notify.NotifyDAO;
 import notify.NotifyService;
 import postcode_stats.PostcodeStatsDAO;
 import property.PropertyController;
@@ -27,17 +26,18 @@ public class REServer {
 
     var postcodeStats = new PostcodeStatsDAO();
     var purchases = new PurchasesDAO();
+    var pricing = new PricingDAO();
 
     var properties = new PropertyDAO();
     PropertyController propertyHandler = new PropertyController(properties, postcodeStats);
 
     var listings = new ListingDAO();
-    ListingController listingHandler = new ListingController(listings);
+    ListingController listingHandler = new ListingController(listings, pricing, properties);
 
     var purchasers = new PurchaserDAO();
     PurchaserController purchaserHandler = new PurchaserController(purchasers);
 
-    NotifyController notifyHandler = new NotifyController(new NotifyDAO(), new NotifyService());
+    NotifyController notifyHandler = new NotifyController(listings, pricing, properties, purchasers, new NotifyService());
 
     // start Javalin on port 7070
     var app = Javalin.create()

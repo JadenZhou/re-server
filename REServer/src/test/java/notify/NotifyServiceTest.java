@@ -1,5 +1,6 @@
 package notify;
 
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -31,7 +32,7 @@ class NotifyServiceTest {
     @Test
     void purchaserMatchesAcrossMultiplePostcodes() {
         Notification n = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("alice", "Alice", "a@x.com", List.of("2000", "2480"))
+                new PurchaserSummary(new ObjectId("alice"), "Alice", "a@x.com", List.of("2000", "2480"))
         )).get(0);
 
         assertEquals(3, n.matches.size(),
@@ -43,7 +44,7 @@ class NotifyServiceTest {
     void purchaserWithUnmatchedPostcodeOmittedFromOutput() {
         // Bob watches 2770, which has zero for-sale properties.
         List<Notification> out = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("bob", "Bob", "b@x.com", List.of("2770"))
+                new PurchaserSummary(new ObjectId("bob"), "Bob", "b@x.com", List.of("2770"))
         ));
         assertTrue(out.isEmpty(),
                 "Purchasers with zero matches should be omitted from the report");
@@ -52,7 +53,7 @@ class NotifyServiceTest {
     @Test
     void purchaserWithNoPostcodesOmittedFromOutput() {
         List<Notification> out = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("carol", "Carol", "c@x.com", List.of())
+                new PurchaserSummary(new ObjectId("carol"), "Carol", "c@x.com", List.of())
         ));
         assertTrue(out.isEmpty(),
                 "Empty postcode list — no preferences — means no notification");
@@ -61,7 +62,7 @@ class NotifyServiceTest {
     @Test
     void purchaserWithNullPostcodesIsSafe() {
         List<Notification> out = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("dave", "Dave", "d@x.com", null)
+                new PurchaserSummary(new ObjectId("dave"), "Dave", "d@x.com", null)
         ));
         assertTrue(out.isEmpty(),
                 "Null postcode list should be treated as no preferences, not crash");
@@ -70,7 +71,7 @@ class NotifyServiceTest {
     @Test
     void emptyIndexEmitsNoNotifications() {
         List<Notification> out = service.notify(Map.of(), List.of(
-                new PurchaserSummary("alice", "Alice", "a@x.com", List.of("2000"))
+                new PurchaserSummary(new ObjectId("alice"), "Alice", "a@x.com", List.of("2000"))
         ));
         assertTrue(out.isEmpty(),
                 "No for-sale properties anywhere → no notifications");
@@ -79,9 +80,9 @@ class NotifyServiceTest {
     @Test
     void multiplePurchasersGetIndependentMatches() {
         List<Notification> out = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("alice", "Alice", "a@x.com", List.of("2000")),
-                new PurchaserSummary("bob",   "Bob",   "b@x.com", List.of("2480")),
-                new PurchaserSummary("carol", "Carol", "c@x.com", List.of("2770"))  // unmatched
+                new PurchaserSummary(new ObjectId("alice"), "Alice", "a@x.com", List.of("2000")),
+                new PurchaserSummary(new ObjectId("bob"),   "Bob",   "b@x.com", List.of("2480")),
+                new PurchaserSummary(new ObjectId("carol"), "Carol", "c@x.com", List.of("2770"))  // unmatched
         ));
         assertEquals(2, out.size(),
                 "Alice and Bob match; Carol is dropped");
@@ -94,7 +95,7 @@ class NotifyServiceTest {
     @Test
     void matchContentsPreserveIdPostcodeAndPrice() {
         Notification n = service.notify(buildIndex(), List.of(
-                new PurchaserSummary("alice", "Alice", "a@x.com", List.of("2480"))
+                new PurchaserSummary(new ObjectId("alice"), "Alice", "a@x.com", List.of("2480"))
         )).get(0);
 
         PropertyForSale only = n.matches.get(0);
